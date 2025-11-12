@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>모바일 호흡 파형 + 폰 위치(기울기) 실시간</title>
+  <style>
+    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
+    .wrap{max-width:940px;margin:0 auto;padding:16px}
+    h1{font-size:20px;margin:10px 0 14px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 12px 30px rgba(0,0,0,.35);margin-bottom:14px}
+    .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    button{appearance:none;border:0;border-radius:12px;padding:12px 14px;background:var(--accent);color:#001533;font-weight:800}
+    button.secondary{background:#1f2a3b;color:var(--fg)}
+    .stat{flex:1 1 160px;background:#0e1622;border:1px solid #1e2737;border-radius:12px;padding:12px}
+    .big{font-size:26px;font-weight:800}
+    .small{font-size:12px;color:var(--muted)}
+    canvas{width:100%;height:180px;background:#0e141d;border:1px solid var(--line);border-radius:12px}
+    .gauge{width:100%;height:220px;background:#0e141d;border:1px solid var(--line);border-radius:12px}
+    .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1622;border:1px solid #243246;color:#cfe3ff;font-size:12px}
+    .ok{color:var(--green)} .warn{color:var(--warn)}
+    .section-title{font-size:13px;color:#9fb3c7;margin:6px 0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>모바일 호흡 파형 + 폰 위치(기울기) 실시간</h1>
+
+    <div class="card">
+      <div class="row" style="gap:10px; margin-bottom:8px">
+        <button id="startAll">시작(마이크+센서)</button>
+        <button id="stopAll" class="secondary" disabled>중지</button>
+        <span id="httpsNote" class="badge">HTTPS 필요(iOS)</span>
+        <span id="permNote" class="badge">권한 요청 전</span>
+      </div>
+
+      <div class="grid">
+        <div class="stat"><div class="small">분당 호흡수 (RPM)</div><div id="rpm" class="big">0.0</div></div>
+        <div class="stat"><div class="small">피크 수(최근 30초)</div><div id="peaks" class="big">0</div></div>
+        <div class="stat"><div class="small">k(민감도)</div><div id="kval" class="big">0.5</div></div>
+      </div>
+
+      <div class="section-title">실시간 마이크 파형(위) & 엔벌로프/피크(아래)</div>
+      <canvas id="wave" width="900" height="180" aria-label="마이크 파형"></canvas>
+      <div style="height:8px"></div>
+      <canvas id="env" width="900" height="180" aria-label="엔벌로프"></canvas>
+
+      <div class="row" style="gap:8px; margin-top:10px">
+        <button id="kUp" class="secondary">k↑</button>
+        <button id="kDown" class="secondary">k↓</button>
+      </div>
+
+      <div class="hint">
+        • iOS는 <b>HTTPS</b> + 버튼 클릭 후에만 마이크/센서 접근이 가능해. 파일로 직접 열면 마이크가 차단될 수 있어. <br>
+        • 조용한 환경에서 휴대폰을 입/코에서 10~15cm 떨어뜨리고 테스트. <br>
+        • k를 올리면 잡음을 덜 집고, 내리면 더 민감하게 잡아.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">폰 위치·자세(가속도 기반)</div>
+      <div class="grid">
+        <div class="stat"><div class="small">Pitch(앞뒤 기울기, °)</div><div id="pitch" class="big">0.0</div></div>
+        <div class="stat"><div class="small">Roll(좌우 기울기, °)</div><div id="roll" class="big">0.0</div></div>
+        <div class="stat"><div class="small">가속도 크기(|g|)</div><div id="amag" class="big">0.00</div></div>
+      </div>
+      <div style="height:10px"></div>
+      <canvas id="pose" class="gauge" width="900" height="220" aria-label="폰 자세"></canvas>
+      <div class="hint">
+        • 기울기는 중력벡터를 이용해서 계산해(정지 상태에서 가장 정확). <br>
+        • 상태 추정: <span id="postureTag" class="badge">분류 대기</span>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(() => {
+  const httpsNote = document.getElementById('httpsNote');
+  const permNote = document.getElementById('permNote');
+  httpsNote.textContent = window.isSecureContext ? '보안 컨텍스트 OK' : 'HTTPS 필요(iOS)';
+  if (!window.isSecureContext) httpsNote.classList.add('warn'); else httpsNote.classList.add('ok');
+
+  const FRAME_SEC = 0.05, WINDOW_SEC = 30, MIN_BREATH_SEC = 1.0;
+  let K = 0.5;
+
+  const wave = document.getElementById('wave');
+  const envc = document.getElementById('env');
+  const gw = wave.getContext('2d');
+  const ge = envc.getContext('2d');
+  const rpmEl = document.getElementById('rpm');
+  const peaksEl = document.getElementById('peaks');
+  const kvalEl = document.getElementById('kval');
+  const kUp = document.getElementById('kUp');
+  const kDown = document.getElementById('kDown');
+
+  let audioCtx, analyser, source, mediaStream;
+  let envBuf = [], lastEnvTime = 0, lastEnvVal = 0, lastPeakTime = -Infinity;
+  const alpha = 0.2;
+  const tmp = new Float32Array(2048);
+
+  function mean(a){ return a.reduce((x,y)=>x+y,0)/a.length }
+  function std(a,m){ const v=a.reduce((s,x)=>s+(x-m)*(x-m),0)/a.length; return Math.sqrt(v) }
+
+  function drawYAxis(ctx, W, H, ticks, toY, labelFmt, padL=40){
+    ctx.fillStyle = '#0b1220'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = '#1e2737'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, 0); ctx.lineTo(padL, H); ctx.stroke();
+    ctx.font = '12px system-ui,-apple-system,Segoe UI,Roboto,Noto Sans KR,sans-serif';
+    ctx.fillStyle = '#8aa0b6';
+    ticks.forEach(t => {
+      const y = toY(t);
+      ctx.strokeStyle = '#1e2737';
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.fillText(labelFmt(t), 6, y+4);
+    });
+    return padL;
+  }
+
+  function drawWave(){
+    const W = wave.width, H = wave.height;
+    const toY = (v)=>{ const top=8,bottom=H-8; const norm=(v+1)/2; return top + (1-norm)*(bottom-top); };
+    const padL = drawYAxis(gw, W, H, [-1,-0.5,0,0.5,1], toY, v=>v.toFixed(1));
+
+    analyser.getFloatTimeDomainData(tmp);
+    gw.strokeStyle = '#9bd1ff'; gw.lineWidth = 2; gw.beginPath();
+    const N = tmp.length; const plotW = W - padL - 6; const x0 = padL;
+    for(let i=0;i<N;i++){
+      const x = x0 + i*(plotW/(N-1));
+      const y = toY(tmp[i]);
+      if (i===0) gw.moveTo(x,y); else gw.lineTo(x,y);
+    }
+    gw.stroke();
+  }
+
+  function computeEnvelope(){
+    analyser.getFloatTimeDomainData(tmp);
+    const now = performance.now() / 1000;
+    let sum=0; for(let i=0;i<tmp.length;i++) sum += tmp[i]*tmp[i];
+    const rms = Math.sqrt(sum/tmp.length);
+    const env = alpha*rms + (1-alpha)*lastEnvVal;
+    lastEnvVal = env;
+
+    if ((now - lastEnvTime) >= FRAME_SEC){
+      envBuf.push({t:now, v:env}); lastEnvTime = now;
+    }
+    const cutoff = now - WINDOW_SEC;
+    while (envBuf.length && envBuf[0].t < cutoff) envBuf.shift();
+  }
+
+  function analyze(){
+    if (envBuf.length < 5) return { rpm:0, peaks:[], thr:0, norm:[] };
+    const vals = envBuf.map(x=>x.v);
+    const vmax = Math.max(1e-9, Math.max(...vals));
+    const vmin = Math.min(...vals);
+    const norm = vals.map(v => (v - vmin) / (vmax - vmin));
+    const mu = mean(norm), sigma = std(norm, mu);
+    const thr = mu + K*sigma;
+
+    const peaks = [];
+    for (let i=1;i<norm.length;i++){
+      if (norm[i-1] < thr && norm[i] >= thr){
+        const t = envBuf[i].t;
+        if (t - lastPeakTime >= MIN_BREATH_SEC){
+          peaks.push(t); lastPeakTime = t;
+        }
+      }
+    }
+    let rpm = 0;
+    if (peaks.length >= 2){
+      const diffs=[]; for(let i=1;i<peaks.length;i++){ const d=peaks[i]-peaks[i-1]; if (d>0.8 && d<10) diffs.push(d); }
+      if (diffs.length){ const meanT = diffs.reduce((a,b)=>a+b,0)/diffs.length; rpm = 60/meanT; }
+    }
+    return { rpm, peaks, thr, norm };
+  }
+
+  function drawEnv(res){
+    const W = envc.width, H = envc.height;
+    const toY = (v)=>{ const top=8,bottom=H-30; const n=Math.max(0,Math.min(1,v)); return top + (1-n)*(bottom-top); };
+    const padL = drawYAxis(ge, W, H, [0,0.25,0.5,0.75,1], toY, v=>v.toFixed(2));
+
+    if (!envBuf.length) return;
+    const N = envBuf.length; const plotW = W - padL - 6; const x0 = padL;
+
+    ge.strokeStyle = '#6aa6ff'; ge.lineWidth = 2; ge.beginPath();
+    for(let i=0;i<N;i++){
+      const x = x0 + i*(plotW/(N-1)); const y = toY(res.norm[i]||0);
+      if (i===0) ge.moveTo(x,y); else ge.lineTo(x,y);
+    }
+    ge.stroke();
+
+    ge.strokeStyle = '#58d68d'; ge.setLineDash([6,6]); ge.beginPath();
+    const ythr = toY(res.thr); ge.moveTo(x0, ythr); ge.lineTo(x0+plotW, ythr); ge.stroke(); ge.setLineDash([]);
+
+    if (res.peaks && res.peaks.length){
+      ge.fillStyle = '#ffd166';
+      const t0 = envBuf[0].t, dt = FRAME_SEC;
+      res.peaks.forEach(tp => {
+        const i = Math.max(0, Math.min(N-1, Math.round((tp - t0)/dt)));
+        const x = x0 + i*(plotW/(N-1)); const y = toY(res.norm[i]||0);
+        ge.beginPath(); ge.arc(x,y,4,0,Math.PI*2); ge.fill();
+      });
+    }
+  }
+
+  const poseCanvas = document.getElementById('pose');
+  const gp = poseCanvas.getContext('2d');
+  const pitchEl = document.getElementById('pitch');
+  const rollEl  = document.getElementById('roll');
+  const amagEl  = document.getElementById('amag');
+  const postureTag = document.getElementById('postureTag');
+
+  let pitch=0, roll=0, amag=0;
+  let motionActive = false;
+
+  function rad2deg(r){ return r*180/Math.PI; }
+
+  function classifyPosture(pitch, roll, amag){
+    const absP = Math.abs(pitch), absR = Math.abs(roll);
+    if (amag < 0.3) return '자유낙하/심한 흔들림';
+    if (absP < 15 && absR < 15) return '수평(테이블 위)';
+    if (absP > 60 && absR < 25) return '세워짐(세로 스탠드)';
+    if (absR > 45 && absP < 30) return '옆으로 기울어짐';
+    return '중간 기울기';
+  }
+
+  function drawPhonePose(){
+    const W = poseCanvas.width, H = poseCanvas.height;
+    gp.clearRect(0,0,W,H);
+    gp.fillStyle = '#0b1220'; gp.fillRect(0,0,W,H);
+    gp.strokeStyle = '#1e2737';
+    gp.beginPath(); gp.moveTo(W/2, 10); gp.lineTo(W/2, H-10); gp.stroke();
+    gp.beginPath(); gp.moveTo(10, H/2); gp.lineTo(W-10, H/2); gp.stroke();
+
+    const cx = W*0.5, cy = H*0.55;
+    const w = 120, h = 200, r = 18;
+    gp.save();
+    gp.translate(cx, cy);
+    gp.rotate(roll * Math.PI/180);
+    gp.fillStyle = '#0f1726';
+    gp.strokeStyle = '#6aa6ff';
+    roundRect(gp, -w/2, -h/2, w, h, r);
+    gp.fill(); gp.stroke();
+    gp.fillStyle = '#263246'; gp.fillRect(-25, -h/2+14, 50, 6);
+    gp.restore();
+
+    gp.fillStyle = '#cfe3ff';
+    gp.font = '14px system-ui,-apple-system,Segoe UI,Roboto,Noto Sans KR,sans-serif';
+    gp.fillText(`Pitch: ${pitch.toFixed(1)}°`, 16, 24);
+    gp.fillText(`Roll : ${roll.toFixed(1)}°`, 16, 44);
+    gp.fillText(`|g|  : ${amag.toFixed(2)}`, 16, 64);
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function onDevMotion(e){
+    if (!e.accelerationIncludingGravity) return;
+    const ax = e.accelerationIncludingGravity.x || 0;
+    const ay = e.accelerationIncludingGravity.y || 0;
+    const az = e.accelerationIncludingGravity.z || 0;
+    amag = Math.sqrt(ax*ax + ay*ay + az*az) / 9.81;
+
+    roll  = rad2deg(Math.atan2(ay, az));
+    pitch = rad2deg(Math.atan2(-ax, Math.sqrt(ay*ay + az*az)));
+
+    pitchEl.textContent = pitch.toFixed(1);
+    rollEl.textContent  = roll.toFixed(1);
+    amagEl.textContent  = amag.toFixed(2);
+    postureTag.textContent = classifyPosture(pitch, roll, amag);
+  }
+
+  function startMotion(){
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+      DeviceMotionEvent.requestPermission().then(state => {
+        if (state === 'granted'){
+          window.addEventListener('devicemotion', onDevMotion, true);
+          permNote.textContent = '센서 권한 OK'; permNote.classList.add('ok');
+          motionActive = true;
+        }else{
+          permNote.textContent = '센서 권한 거부'; permNote.classList.add('warn');
+        }
+      }).catch(()=>{ permNote.textContent = '센서 요청 실패'; permNote.classList.add('warn'); });
+    }else{
+      window.addEventListener('devicemotion', onDevMotion, true);
+      motionActive = true;
+      permNote.textContent = '센서 수집 중'; permNote.classList.add('ok');
+    }
+  }
+
+  let rafId;
+  function loop(){
+    if (analyser){
+      computeEnvelope();
+      const res = analyze();
+      drawWave();
+      drawEnv(res);
+      rpmEl.textContent = (res.rpm||0).toFixed(1);
+      peaksEl.textContent = (res.peaks?res.peaks.length:0);
+    }
+    if (motionActive){
+      drawPhonePose();
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  const startAll = document.getElementById('startAll');
+  const stopAll  = document.getElementById('stopAll');
+
+  startAll.onclick = async () => {
+    try{
+      kvalEl.textContent = K.toFixed(1);
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+        video: false
+      });
+      source = audioCtx.createMediaStreamSource(mediaStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.0;
+      source.connect(analyser);
+
+      startMotion();
+
+      startAll.disabled = true; stopAll.disabled = false;
+      envBuf = []; lastEnvTime=0; lastEnvVal=0; lastPeakTime=-Infinity;
+      cancelAnimationFrame(rafId);
+      loop();
+      permNote.textContent = '권한 요청 완료';
+    }catch(err){
+      alert('시작 실패: ' + (err && err.message ? err.message : err));
+    }
+  };
+
+  stopAll.onclick = () => {
+    try{
+      if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); }
+      if (audioCtx){ audioCtx.close(); }
+      window.removeEventListener('devicemotion', onDevMotion, true);
+      startAll.disabled = false; stopAll.disabled = true;
+    }catch(e){}
+  };
+
+  kUp.onclick = () => { K = Math.min(1.2, K+0.1); kvalEl.textContent = K.toFixed(1); };
+  kDown.onclick = () => { K = Math.max(0.1, K-0.1); kvalEl.textContent = K.toFixed(1); };
+})();
+</script>
+</body>
+</html>
