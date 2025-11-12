@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>모바일 높낮이(고도) 실시간 · 바리오/지오/가속도 Fallback</title>
+  <title>모바일 높낮이 실시간 · 바리오/지오/가속도(개선판)</title>
   <style>
     :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454;--amber:#ffcd60}
     *{box-sizing:border-box}
@@ -26,15 +26,20 @@
     .tag{padding:3px 8px;border-radius:999px;border:1px solid #2a3950;background:#0f1623}
     .on{border-color:#58d68d;color:#58d68d}
     .off{border-color:#3a465a;color:#8aa0b6}
+    .meter{width:100%;height:10px;background:#0e1622;border:1px solid #1e2737;border-radius:8px;overflow:hidden}
+    .bar{height:100%;background:#6aa6ff;transform:scaleX(0);transform-origin:left}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>모바일 높낮이(고도) 실시간 · 바리오/지오/가속도 Fallback</h1>
+    <h1>모바일 높낮이 실시간 · 바리오/지오/가속도(개선판)</h1>
     <div class="card">
       <div class="row" style="gap:10px; margin-bottom:8px">
         <button id="startBtn">시작(센서)</button>
         <button id="stopBtn" class="secondary" disabled>중지</button>
+        <button id="zeroBtn" class="secondary" disabled>제로(0점 재설정)</button>
+        <button id="gainUp" class="secondary" disabled>Gain↑</button>
+        <button id="gainDown" class="secondary" disabled>Gain↓</button>
         <span id="secNote" class="badge">HTTPS 권장</span>
         <span id="statusNote" class="badge">대기 중</span>
       </div>
@@ -42,17 +47,21 @@
         <span id="tagBaro" class="tag off">Barometer</span>
         <span id="tagGeo" class="tag off">Geolocation.alt</span>
         <span id="tagAccel" class="tag off">Accelerometer(추정)</span>
+        <span class="tag">Gain: <b id="gainLabel">1.0×</b></span>
       </div>
       <div class="row" style="gap:10px; margin:10px 0 8px">
         <div class="stat"><div class="small">상대 높이 Δh (cm)</div><div id="hRel" class="big">—</div></div>
         <div class="stat"><div class="small">상승/하강 속도 (cm/s)</div><div id="vRate" class="big">—</div></div>
         <div class="stat"><div class="small">활성 소스</div><div id="src" class="big">—</div></div>
       </div>
-      <div class="section-title">높이(Δh) 타임시리즈 — 시작 시점을 0으로 보정</div>
+      <div class="section-title">세로 가속도(검증용) — 움직이면 막대가 반응해야 정상</div>
+      <div class="meter"><div id="aBar" class="bar"></div></div>
+
+      <div class="section-title" style="margin-top:12px">높이(Δh) 타임시리즈 — 시작 시점을 0으로 보정</div>
       <canvas id="hChart" width="900" height="200" aria-label="상대 고도 그래프"></canvas>
       <div class="hint">
-        • 우선순위: <b>Barometer</b> → <b>Geolocation.altitude</b> → <b>Accelerometer 추정</b> (둘 다 불가 시). <br>
-        • iOS 사파리는 Barometer 미지원일 수 있고, 실내 GPS 고도는 null일 수 있어. 이럴 땐 가속도 기반 추정으로 상대 높낮이만 표시(절대 고도 아님).
+        • 개선점: 기존 일부 기기에서 <i>linear acceleration</i>가 0으로만 들어오던 문제를 해결하기 위해, <b>accIncludingGravity</b>에 <b>저역 통과(LPF)</b>로 중력 벡터를 추정하고, 이를 빼서 <b>선형가속도</b>를 얻은 뒤 중력방향으로 투영해 적분해. <br>
+        • 움직여도 Δh가 0이면 권한(모션/위치) 또는 브라우저 제한일 확률이 높아. 주소창 → 사이트 설정에서 권한 허용 확인.
       </div>
     </div>
   </div>
@@ -67,34 +76,41 @@
   const tagAccel = document.getElementById('tagAccel');
   const startBtn = document.getElementById('startBtn');
   const stopBtn  = document.getElementById('stopBtn');
+  const zeroBtn  = document.getElementById('zeroBtn');
+  const gainUpBtn= document.getElementById('gainUp');
+  const gainDnBtn= document.getElementById('gainDown');
+  const gainLabel= document.getElementById('gainLabel');
   const hRelEl = document.getElementById('hRel');
   const vRateEl = document.getElementById('vRate');
   const srcEl = document.getElementById('src');
+  const aBar = document.getElementById('aBar');
   const canvas = document.getElementById('hChart');
   const g = canvas.getContext('2d');
 
   const isHTTPS = window.isSecureContext;
   secNote.textContent = isHTTPS ? '보안 컨텍스트 OK' : 'HTTPS 권장(iOS 필요)';
   if (!isHTTPS) secNote.classList.add('warn'); else secNote.classList.add('ok');
-
   function setTag(el, on){ el.classList.toggle('on', on); el.classList.toggle('off', !on); }
 
   // ===== Data state =====
   let running = false;
   let hBuf = []; // {t, h} meters
-  let lastH = null, lastT = null;
+  let lastH = 0, lastT = null;
+  let gain = 1.0;
 
   // Sources
   let refPressure = null; // Pa
-  let baro = null, baroActive = false;
-  let watchId = null, geoActive = false, refAltGeo = null;
+  let baro = null, baroActive = false, lastBaroH = null;
+  let watchId = null, geoActive = false, refAltGeo = null, lastGeoH = null, lastGeoAcc = null;
   let accelActive = false;
 
-  // Accelerometer-based estimation (fallback)
-  let velZ = 0, dispZ = 0;
+  // Accelerometer improved
+  let gLPF = {x:0, y:0, z:0};       // gravity estimate (LPF)
+  const ALPHA = 0.02;                // LPF factor (0..1) small = smoother
+  let velZ = 0, dispZ = 0;           // integrated values
   let lastMotionT = null;
-  const DAMP_V = 0.98;  // velocity damping (to fight drift)
-  const DAMP_X = 0.999; // displacement slow drift clamp
+  const DAMP_V = 0.985;              // velocity damping
+  const DAMP_X = 0.9995;             // displacement slow drift clamp
 
   // ===== Rendering =====
   function drawAxes(){
@@ -161,25 +177,21 @@
     return null;
   }
 
-  // ===== Feed a new height sample (meters) =====
   function feedHeight(h_m, srcLabel){
     const now = performance.now()/1000;
     if (typeof h_m !== 'number' || !isFinite(h_m)) return;
-
-    if (lastT != null && lastH != null){
-      const v = (h_m - lastH) / (now - lastT); // m/s
-      vRateEl.textContent = (v*100).toFixed(1); // cm/s
+    if (lastT != null){
+      const v = (h_m - lastH) / (now - lastT);
+      vRateEl.textContent = (v*100).toFixed(1);
     }
     lastH = h_m; lastT = now;
     hBuf.push({ t: now, h: h_m });
-
     hRelEl.textContent = (h_m*100).toFixed(1);
     srcEl.textContent = srcLabel;
     render();
   }
 
   // ===== Barometer =====
-  let lastBaroH = null;
   function startBarometer(){
     try{
       if ('Barometer' in window){
@@ -188,21 +200,16 @@
           baroActive = true; setTag(tagBaro, true);
           let p = baro.pressure ?? baro.reading?.pressure ?? baro.reading?.pressureValue;
           if (typeof p !== 'number') return;
-          // normalize units
           if (p < 200) p *= 1000; else if (p < 2000) p *= 100;
           lastBaroH = relAltFromPressure(p);
-          // defer fusion in main tick with geolocation if any
         });
         baro.addEventListener('error', e => { console.warn('baro error', e); });
         baro.start();
       }
-    }catch(e){
-      console.warn('Barometer start failed', e);
-    }
+    }catch(e){ console.warn('Barometer start failed', e); }
   }
 
   // ===== Geolocation =====
-  let lastGeoH = null, lastGeoAcc = null;
   function startGeolocation(){
     try{
       if ('geolocation' in navigator){
@@ -213,46 +220,51 @@
           if (refAltGeo == null) refAltGeo = alt;
           lastGeoH = alt - refAltGeo;
           lastGeoAcc = pos.coords.altitudeAccuracy;
-        }, (err)=>{
-          console.warn('geo error', err);
-        }, { enableHighAccuracy:true, maximumAge:500, timeout:8000 });
+        }, (err)=>{ console.warn('geo error', err); }, { enableHighAccuracy:true, maximumAge:500, timeout:8000 });
       }
-    }catch(e){
-      console.warn('geo start failed', e);
-    }
+    }catch(e){ console.warn('geo start failed', e); }
   }
 
-  // ===== Accelerometer fallback (DeviceMotion) =====
+  // ===== Accelerometer (improved) =====
   function startAccelerometer(){
     function onMotion(e){
       accelActive = true; setTag(tagAccel, true);
       const t = performance.now()/1000;
       const dt = (lastMotionT==null) ? 0 : (t - lastMotionT);
       lastMotionT = t;
-
-      // vertical axis: project linear acceleration onto gravity direction
       const ag = e.accelerationIncludingGravity || {};
-      const a  = e.acceleration || {};
-      if (ag.x==null || ag.y==null || ag.z==null) return;
+      const axg = ag.x ?? 0, ayg = ag.y ?? 0, azg = ag.z ?? 0;
 
-      // Gravity vector (approx) from includingGravity minus linear acceleration is unstable on some devices.
-      // Use includingGravity normalized as gravity direction; then use linear acceleration (a) magnitude on that axis.
-      const gx = ag.x, gy = ag.y, gz = ag.z;
-      const gnorm = Math.hypot(gx, gy, gz) || 9.81;
-      const ux = gx/gnorm, uy = gy/gnorm, uz = gz/gnorm; // up-direction approx (device coords)
+      // LPF to estimate gravity vector
+      gLPF.x = (1-ALPHA)*gLPF.x + ALPHA*axg;
+      gLPF.y = (1-ALPHA)*gLPF.y + ALPHA*ayg;
+      gLPF.z = (1-ALPHA)*gLPF.z + ALPHA*azg;
 
-      const ax = a.x||0, ay = a.y||0, az = a.z||0; // m/s^2 (linear accel; may be null on iOS → becomes 0)
-      const aVert = ax*ux + ay*uy + az*uz; // along gravity axis (up positive)
+      // linear accel ≈ includingGravity - gravityLPF
+      const lax = axg - gLPF.x;
+      const lay = ayg - gLPF.y;
+      const laz = azg - gLPF.z;
 
-      // Integrate to velocity/position with damping to curb drift
+      // gravity direction (up vector)
+      const gmag = Math.hypot(gLPF.x, gLPF.y, gLPF.z) || 9.81;
+      const ux = gLPF.x / gmag, uy = gLPF.y / gmag, uz = gLPF.z / gmag;
+
+      // vertical acceleration along gravity axis (m/s^2)
+      const aVert = (lax*ux + lay*uy + laz*uz);
+
+      // Show accel meter (|aVert| / 2 m/s^2 capped)
+      const m = Math.min(1, Math.abs(aVert)/2);
+      aBar.style.transform = `scaleX(${m})`;
+
       if (dt>0 && dt<0.5){
         velZ = DAMP_V * (velZ + aVert * dt);
         dispZ = DAMP_X * (dispZ + velZ * dt);
-        // clamp extreme drift
-        if (Math.abs(dispZ) > 0.25) dispZ *= 0.95;
+        // gain (for small motions like 호흡)
+        const h = dispZ * gain;
+        // Clamp drift softly
+        if (Math.abs(h) > 0.25) { dispZ *= 0.98; }
+        feedHeight(h, activeSourceLabel());
       }
-
-      feedHeight(dispZ, activeSourceLabel());
     }
 
     function requestPermAndStart(){
@@ -281,34 +293,34 @@
     return parts.join('+') || '—';
   }
 
-  // ===== Main tick: fuse baro+geo if present; else accel pushes directly =====
+  // ===== Main tick: fuse baro+geo if present; else accel handler already feeds =====
   function tick(){
     if (!running){ requestAnimationFrame(tick); return; }
     const fused = fuseHeights(lastBaroH, lastGeoH, lastGeoAcc);
     if (fused != null){
+      // Zero reference is implicitly set at start by using deltas
       feedHeight(fused, activeSourceLabel());
-    }else{
-      // if no baro/geo yet, accelerometer handler feeds
     }
     requestAnimationFrame(tick);
   }
 
-  // ===== Start/Stop =====
+  // ===== Start/Stop/Zero/Gain =====
+  function zeroRef(){
+    // Reset integrator & baselines
+    refPressure = null; refAltGeo = null;
+    lastBaroH = null; lastGeoH = null; lastGeoAcc = null;
+    velZ = 0; dispZ = 0; lastMotionT = null;
+    hBuf = []; lastH = 0; lastT = null;
+    hRelEl.textContent = '0.0'; vRateEl.textContent = '0.0';
+  }
+
   function startAll(){
     if (running) return;
     running = true;
     statusNote.textContent = '수집 중'; statusNote.classList.remove('warn'); statusNote.classList.add('ok');
-    startBtn.disabled = true; stopBtn.disabled = false;
-
-    // reset
-    hBuf = []; lastH = null; lastT = null;
-    refPressure = null; refAltGeo = null;
-    lastBaroH = null; lastGeoH = null; lastGeoAcc = null;
-    baroActive = geoActive = accelActive = false;
+    startBtn.disabled = true; stopBtn.disabled = false; zeroBtn.disabled = false; gainUpBtn.disabled = false; gainDnBtn.disabled = false;
     setTag(tagBaro, false); setTag(tagGeo, false); setTag(tagAccel, false);
-    hRelEl.textContent = '0.0'; vRateEl.textContent = '0.0'; srcEl.textContent = '—';
-    velZ = 0; dispZ = 0; lastMotionT = null;
-
+    zeroRef();
     startBarometer();
     startGeolocation();
     startAccelerometer();
@@ -317,18 +329,24 @@
 
   function stopAll(){
     running = false;
-    startBtn.disabled = false; stopBtn.disabled = true;
+    startBtn.disabled = false; stopBtn.disabled = true; zeroBtn.disabled = true; gainUpBtn.disabled = true; gainDnBtn.disabled = true;
     statusNote.textContent = '중지'; statusNote.classList.remove('ok');
     try{
       if (watchId != null) navigator.geolocation.clearWatch(watchId);
       watchId = null;
       if (baro && baro.stop) baro.stop();
-      window.removeEventListener('devicemotion', ()=>{}, true); // generic remove
+      window.removeEventListener('devicemotion', ()=>{}, true);
     }catch(e){}
   }
 
+  function gainUp(){ gain = Math.min(8, +(gain + 0.5).toFixed(1)); gainLabel.textContent = gain.toFixed(1)+'×'; }
+  function gainDown(){ gain = Math.max(0.5, +(gain - 0.5).toFixed(1)); gainLabel.textContent = gain.toFixed(1)+'×'; }
+
   startBtn.addEventListener('click', startAll);
   stopBtn.addEventListener('click', stopAll);
+  zeroBtn.addEventListener('click', zeroRef);
+  gainUpBtn.addEventListener('click', gainUp);
+  gainDnBtn.addEventListener('click', gainDown);
 })();
 </script>
 </body>
