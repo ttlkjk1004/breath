@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>모바일 높낮이(고도) 실시간 · 바리오+지오로케이션</title>
+  <title>모바일 높낮이(고도) 실시간 · 바리오/지오/가속도 Fallback</title>
   <style>
-    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454}
+    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454;--amber:#ffcd60}
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
     .wrap{max-width:940px;margin:0 auto;padding:16px}
@@ -20,57 +20,51 @@
     canvas{width:100%;height:200px;background:#0e141d;border:1px solid var(--line);border-radius:12px}
     .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
     .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1622;border:1px solid #243246;color:#cfe3ff;font-size:12px}
-    .ok{color:var(--green)} .warn{color:var(--warn)}
+    .ok{color:var(--green)} .warn{color:var(--warn)} .amber{color:var(--amber)}
     .section-title{font-size:13px;color:#9fb3c7;margin:6px 0}
+    .srcs{display:flex;flex-wrap:wrap;gap:6px}
+    .tag{padding:3px 8px;border-radius:999px;border:1px solid #2a3950;background:#0f1623}
+    .on{border-color:#58d68d;color:#58d68d}
+    .off{border-color:#3a465a;color:#8aa0b6}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>모바일 높낮이(고도) 실시간 · 바리오+지오로케이션</h1>
+    <h1>모바일 높낮이(고도) 실시간 · 바리오/지오/가속도 Fallback</h1>
     <div class="card">
       <div class="row" style="gap:10px; margin-bottom:8px">
         <button id="startBtn">시작(센서)</button>
         <button id="stopBtn" class="secondary" disabled>중지</button>
         <span id="secNote" class="badge">HTTPS 권장</span>
-        <span id="srcNote" class="badge">소스: 대기중</span>
+        <span id="statusNote" class="badge">대기 중</span>
       </div>
-      <div class="row" style="gap:10px; margin-bottom:8px">
-        <div class="stat"><div class="small">상대 높이 Δh (cm)</div><div id="hRel" class="big">0.0</div></div>
-        <div class="stat"><div class="small">상승/하강 속도 (cm/s)</div><div id="vRate" class="big">0.0</div></div>
-        <div class="stat"><div class="small">데이터 소스</div><div id="src" class="big">—</div></div>
+      <div class="srcs">
+        <span id="tagBaro" class="tag off">Barometer</span>
+        <span id="tagGeo" class="tag off">Geolocation.alt</span>
+        <span id="tagAccel" class="tag off">Accelerometer(추정)</span>
+      </div>
+      <div class="row" style="gap:10px; margin:10px 0 8px">
+        <div class="stat"><div class="small">상대 높이 Δh (cm)</div><div id="hRel" class="big">—</div></div>
+        <div class="stat"><div class="small">상승/하강 속도 (cm/s)</div><div id="vRate" class="big">—</div></div>
+        <div class="stat"><div class="small">활성 소스</div><div id="src" class="big">—</div></div>
       </div>
       <div class="section-title">높이(Δh) 타임시리즈 — 시작 시점을 0으로 보정</div>
       <canvas id="hChart" width="900" height="200" aria-label="상대 고도 그래프"></canvas>
       <div class="hint">
-        • 우선순위: <b>Barometer(기압)</b> → <b>Geolocation.altitude</b>. 가능한 경우 두 소스를 융합(평균)해서 더 안정적인 값을 보여줘. <br>
-        • 시작 버튼을 누르면 기준점(P₀ 또는 h₀)을 잡고 이후 값은 상대 높이(Δh)를 표시해. <br>
-        • 실내에서는 GPS 고도가 <i>null</i>일 수 있어. 이때는 기압 센서만 사용해.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="section-title">호흡 코칭(선택): Δh 파형 기반 피크 감지</div>
-      <div class="row" style="gap:10px; margin-bottom:8px">
-        <div class="stat"><div class="small">임계값 k</div><div id="kval" class="big">0.6</div></div>
-        <div class="stat"><div class="small">분당 호흡수(RPM)</div><div id="rpm" class="big">0.0</div></div>
-        <div class="stat"><div class="small">피크(최근 30초)</div><div id="peaks" class="big">0</div></div>
-      </div>
-      <div class="row">
-        <button id="kUp" class="secondary">k↑</button>
-        <button id="kDown" class="secondary">k↓</button>
-        <span class="hint">휴대폰을 <b>가슴/배 위</b>에 올려 놓으면 들숨·날숨에 따라 Δh가 위아래로 움직여. 그 파형의 피크를 잡아서 RPM을 추정해.</span>
+        • 우선순위: <b>Barometer</b> → <b>Geolocation.altitude</b> → <b>Accelerometer 추정</b> (둘 다 불가 시). <br>
+        • iOS 사파리는 Barometer 미지원일 수 있고, 실내 GPS 고도는 null일 수 있어. 이럴 땐 가속도 기반 추정으로 상대 높낮이만 표시(절대 고도 아님).
       </div>
     </div>
   </div>
 
 <script>
 (() => {
+  // ===== UI =====
   const secNote = document.getElementById('secNote');
-  const srcNote = document.getElementById('srcNote');
-  const isHTTPS = window.isSecureContext;
-  secNote.textContent = isHTTPS ? '보안 컨텍스트 OK' : 'HTTPS 권장(iOS 필요)';
-  if (!isHTTPS) secNote.classList.add('warn'); else secNote.classList.add('ok');
-
+  const statusNote = document.getElementById('statusNote');
+  const tagBaro = document.getElementById('tagBaro');
+  const tagGeo = document.getElementById('tagGeo');
+  const tagAccel = document.getElementById('tagAccel');
   const startBtn = document.getElementById('startBtn');
   const stopBtn  = document.getElementById('stopBtn');
   const hRelEl = document.getElementById('hRel');
@@ -78,30 +72,31 @@
   const srcEl = document.getElementById('src');
   const canvas = document.getElementById('hChart');
   const g = canvas.getContext('2d');
-  const kvalEl = document.getElementById('kval');
-  const rpmEl = document.getElementById('rpm');
-  const peaksEl = document.getElementById('peaks');
-  const kUp = document.getElementById('kUp');
-  const kDown = document.getElementById('kDown');
 
-  let refPressure = null; // Pa
-  let refAltGeo = null;   // m
-  let lastH = 0;
-  let lastT = null;
-  let hBuf = [];
+  const isHTTPS = window.isSecureContext;
+  secNote.textContent = isHTTPS ? '보안 컨텍스트 OK' : 'HTTPS 권장(iOS 필요)';
+  if (!isHTTPS) secNote.classList.add('warn'); else secNote.classList.add('ok');
+
+  function setTag(el, on){ el.classList.toggle('on', on); el.classList.toggle('off', !on); }
+
+  // ===== Data state =====
   let running = false;
-  let watchId = null;
-  let baro = null;
-  let srcs = { baro:false, geo:false };
+  let hBuf = []; // {t, h} meters
+  let lastH = null, lastT = null;
 
-  let K = 0.6;
-  let lastPeakTime = -Infinity;
-  const FRAME_SEC = 0.1;
-  const WINDOW_SEC = 30;
-  const MIN_BREATH_SEC = 1.0;
-  let lastFrameTime = 0;
-  let normBuf = [];
+  // Sources
+  let refPressure = null; // Pa
+  let baro = null, baroActive = false;
+  let watchId = null, geoActive = false, refAltGeo = null;
+  let accelActive = false;
 
+  // Accelerometer-based estimation (fallback)
+  let velZ = 0, dispZ = 0;
+  let lastMotionT = null;
+  const DAMP_V = 0.98;  // velocity damping (to fight drift)
+  const DAMP_X = 0.999; // displacement slow drift clamp
+
+  // ===== Rendering =====
   function drawAxes(){
     const W = canvas.width, H = canvas.height;
     g.fillStyle = '#0b1220'; g.fillRect(0,0,W,H);
@@ -130,15 +125,12 @@
   }
 
   function render(){
-    if (!running) return;
     const W = canvas.width, H = canvas.height;
     const { padL, padR, padT, padB } = drawAxes();
-
     const now = performance.now()/1000;
     const cutoff = now - 30;
     hBuf = hBuf.filter(p => p.t >= cutoff);
     if (hBuf.length < 2) return;
-
     const t0 = hBuf[0].t, t1 = hBuf[hBuf.length-1].t;
     const dt = t1 - t0 || 1;
     g.strokeStyle = '#6aa6ff'; g.lineWidth = 2; g.beginPath();
@@ -150,153 +142,193 @@
     g.stroke();
   }
 
+  // ===== Fusion helpers =====
   function relAltFromPressure(pPa){
     if (refPressure == null) { refPressure = pPa; return 0; }
     const p0 = refPressure, p = pPa;
-    return 8434 * Math.log(p0 / p);
-  }
-
-  function onBaroReading(pressureValue){
-    let pPa = pressureValue;
-    if (pPa < 200) { pPa = pressureValue * 1000; }       // kPa → Pa
-    else if (pPa < 2000) { pPa = pressureValue * 100; }  // hPa → Pa
-    const h = relAltFromPressure(pPa);
-    feedHeight(h, 'baro');
-  }
-
-  function onGeo(position){
-    const alt = position.coords.altitude;
-    const acc = position.coords.altitudeAccuracy;
-    if (alt == null) return;
-    if (refAltGeo == null) refAltGeo = alt;
-    const h = alt - refAltGeo;
-    feedHeight(h, 'geo', acc);
+    return 8434 * Math.log(p0 / p); // meters
   }
 
   function fuseHeights(hBaro, hGeo, acc){
-    if (hBaro == null) return hGeo;
-    if (hGeo == null) return hBaro;
-    const wGeo = (acc && acc>0) ? Math.max(0.1, Math.min(0.9, 1/(acc/3))) : 0.5;
-    const wBaro = 1 - wGeo;
-    return wBaro*hBaro + wGeo*hGeo;
+    const hasBaro = (typeof hBaro === 'number' && isFinite(hBaro));
+    const hasGeo  = (typeof hGeo === 'number'  && isFinite(hGeo));
+    if (hasBaro && hasGeo){
+      const wGeo = (acc && acc>0) ? Math.max(0.1, Math.min(0.9, 1/(acc/3))) : 0.5;
+      const wBaro = 1 - wGeo;
+      return wBaro*hBaro + wGeo*hGeo;
+    } else if (hasBaro) return hBaro;
+    else if (hasGeo) return hGeo;
+    return null;
   }
 
-  let lastBaroH = null, lastGeoH = null, lastGeoAcc = null;
-
-  function feedHeight(h, src, acc){
+  // ===== Feed a new height sample (meters) =====
+  function feedHeight(h_m, srcLabel){
     const now = performance.now()/1000;
-    if (src === 'baro'){ lastBaroH = h; }
-    if (src === 'geo'){ lastGeoH = h; lastGeoAcc = acc; }
-    const fused = fuseHeights(lastBaroH, lastGeoH, lastGeoAcc);
+    if (typeof h_m !== 'number' || !isFinite(h_m)) return;
 
-    if (lastT != null){
-      const v = (fused - lastH) / (now - lastT);
-      vRateEl.textContent = (v*100).toFixed(1);
+    if (lastT != null && lastH != null){
+      const v = (h_m - lastH) / (now - lastT); // m/s
+      vRateEl.textContent = (v*100).toFixed(1); // cm/s
     }
-    lastH = fused; lastT = now;
-    hBuf.push({ t: now, h: fused });
+    lastH = h_m; lastT = now;
+    hBuf.push({ t: now, h: h_m });
 
-    hRelEl.textContent = (fused*100).toFixed(1);
-    const srcText = srcs.baro && srcs.geo ? '바리오+지오 융합' : (srcs.baro ? '바리오' : '지오로케이션');
-    srcEl.textContent = srcText; srcNote.textContent = srcText;
-
-    // Peak logic
-    if (!lastFrameTime || now - lastFrameTime >= FRAME_SEC){
-      lastFrameTime = now;
-      const vals = hBuf.map(p=>p.h);
-      const vmin = Math.min(...vals), vmax = Math.max(...vals);
-      const span = Math.max(1e-6, vmax - vmin);
-      const n = (fused - vmin) / span;
-      normBuf.push({t:now, n});
-      while (normBuf.length && normBuf[0].t < now - WINDOW_SEC) normBuf.shift();
-
-      const arr = normBuf.map(x=>x.n);
-      const mu = arr.reduce((a,b)=>a+b,0)/arr.length || 0;
-      const sig = Math.sqrt(arr.reduce((s,x)=>s+(x-mu)*(x-mu),0)/arr.length || 0);
-      const thr = mu + K*sig;
-      const L = normBuf.length;
-      if (L>=2){
-        const a = normBuf[L-2], b = normBuf[L-1];
-        if (a.n < thr && b.n >= thr){
-          if (b.t - lastPeakTime >= MIN_BREATH_SEC){
-            lastPeakTime = b.t;
-          }
-        }
-      }
-      const peaks = [];
-      for (let i=1;i<normBuf.length;i++){
-        const thrI = mu + K*sig;
-        if (normBuf[i-1].n < thrI && normBuf[i].n >= thrI){
-          if (!peaks.length || normBuf[i].t - peaks[peaks.length-1] >= MIN_BREATH_SEC){
-            peaks.push(normBuf[i].t);
-          }
-        }
-      }
-      peaksEl.textContent = peaks.length;
-      if (peaks.length >= 2){
-        const diffs = [];
-        for (let i=1;i<peaks.length;i++){
-          const d = peaks[i]-peaks[i-1];
-          if (d>0.8 && d<10) diffs.push(d);
-        }
-        if (diffs.length){
-          const meanT = diffs.reduce((a,b)=>a+b,0)/diffs.length;
-          rpmEl.textContent = (60/meanT).toFixed(1);
-        }
-      }
-    }
-
+    hRelEl.textContent = (h_m*100).toFixed(1);
+    srcEl.textContent = srcLabel;
     render();
   }
 
-  async function start(){
-    if (running) return;
-    running = true;
-    srcNote.textContent = '소스 초기화 중…';
-    startBtn.disabled = true; stopBtn.disabled = false;
-    refPressure = null; refAltGeo = null; lastH = 0; lastT = null;
-    hBuf = []; normBuf = []; lastPeakTime = -Infinity;
-    srcs = {baro:false, geo:false};
-
+  // ===== Barometer =====
+  let lastBaroH = null;
+  function startBarometer(){
     try{
       if ('Barometer' in window){
         baro = new Barometer({ frequency: 10 });
         baro.addEventListener('reading', () => {
-          srcs.baro = true;
-          onBaroReading(baro.pressure ?? baro.reading?.pressure ?? baro.reading?.pressureValue);
+          baroActive = true; setTag(tagBaro, true);
+          let p = baro.pressure ?? baro.reading?.pressure ?? baro.reading?.pressureValue;
+          if (typeof p !== 'number') return;
+          // normalize units
+          if (p < 200) p *= 1000; else if (p < 2000) p *= 100;
+          lastBaroH = relAltFromPressure(p);
+          // defer fusion in main tick with geolocation if any
         });
         baro.addEventListener('error', e => { console.warn('baro error', e); });
         baro.start();
       }
-    }catch(e){ console.warn('Barometer start failed', e); }
+    }catch(e){
+      console.warn('Barometer start failed', e);
+    }
+  }
 
+  // ===== Geolocation =====
+  let lastGeoH = null, lastGeoAcc = null;
+  function startGeolocation(){
     try{
       if ('geolocation' in navigator){
-        watchId = navigator.geolocation.watchPosition(onGeo, (err)=>{
+        watchId = navigator.geolocation.watchPosition((pos)=>{
+          geoActive = true; setTag(tagGeo, true);
+          const alt = pos.coords.altitude;
+          if (alt == null) return;
+          if (refAltGeo == null) refAltGeo = alt;
+          lastGeoH = alt - refAltGeo;
+          lastGeoAcc = pos.coords.altitudeAccuracy;
+        }, (err)=>{
           console.warn('geo error', err);
         }, { enableHighAccuracy:true, maximumAge:500, timeout:8000 });
       }
-    }catch(e){ console.warn('geo watch failed', e); }
-
-    srcNote.textContent = '수집 중…';
+    }catch(e){
+      console.warn('geo start failed', e);
+    }
   }
 
-  function stop(){
+  // ===== Accelerometer fallback (DeviceMotion) =====
+  function startAccelerometer(){
+    function onMotion(e){
+      accelActive = true; setTag(tagAccel, true);
+      const t = performance.now()/1000;
+      const dt = (lastMotionT==null) ? 0 : (t - lastMotionT);
+      lastMotionT = t;
+
+      // vertical axis: project linear acceleration onto gravity direction
+      const ag = e.accelerationIncludingGravity || {};
+      const a  = e.acceleration || {};
+      if (ag.x==null || ag.y==null || ag.z==null) return;
+
+      // Gravity vector (approx) from includingGravity minus linear acceleration is unstable on some devices.
+      // Use includingGravity normalized as gravity direction; then use linear acceleration (a) magnitude on that axis.
+      const gx = ag.x, gy = ag.y, gz = ag.z;
+      const gnorm = Math.hypot(gx, gy, gz) || 9.81;
+      const ux = gx/gnorm, uy = gy/gnorm, uz = gz/gnorm; // up-direction approx (device coords)
+
+      const ax = a.x||0, ay = a.y||0, az = a.z||0; // m/s^2 (linear accel; may be null on iOS → becomes 0)
+      const aVert = ax*ux + ay*uy + az*uz; // along gravity axis (up positive)
+
+      // Integrate to velocity/position with damping to curb drift
+      if (dt>0 && dt<0.5){
+        velZ = DAMP_V * (velZ + aVert * dt);
+        dispZ = DAMP_X * (dispZ + velZ * dt);
+        // clamp extreme drift
+        if (Math.abs(dispZ) > 0.25) dispZ *= 0.95;
+      }
+
+      feedHeight(dispZ, activeSourceLabel());
+    }
+
+    function requestPermAndStart(){
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+        DeviceMotionEvent.requestPermission().then(state => {
+          if (state === 'granted'){
+            window.addEventListener('devicemotion', onMotion, true);
+          }else{
+            statusNote.textContent = '가속도 권한 거부'; statusNote.classList.add('warn');
+          }
+        }).catch(()=>{
+          statusNote.textContent = '가속도 권한 요청 실패'; statusNote.classList.add('warn');
+        });
+      }else{
+        window.addEventListener('devicemotion', onMotion, true);
+      }
+    }
+    requestPermAndStart();
+  }
+
+  function activeSourceLabel(){
+    const parts = [];
+    if (baroActive) parts.push('Baro');
+    if (geoActive) parts.push('Geo');
+    if (!baroActive && !geoActive && accelActive) parts.push('Accel');
+    return parts.join('+') || '—';
+  }
+
+  // ===== Main tick: fuse baro+geo if present; else accel pushes directly =====
+  function tick(){
+    if (!running){ requestAnimationFrame(tick); return; }
+    const fused = fuseHeights(lastBaroH, lastGeoH, lastGeoAcc);
+    if (fused != null){
+      feedHeight(fused, activeSourceLabel());
+    }else{
+      // if no baro/geo yet, accelerometer handler feeds
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // ===== Start/Stop =====
+  function startAll(){
+    if (running) return;
+    running = true;
+    statusNote.textContent = '수집 중'; statusNote.classList.remove('warn'); statusNote.classList.add('ok');
+    startBtn.disabled = true; stopBtn.disabled = false;
+
+    // reset
+    hBuf = []; lastH = null; lastT = null;
+    refPressure = null; refAltGeo = null;
+    lastBaroH = null; lastGeoH = null; lastGeoAcc = null;
+    baroActive = geoActive = accelActive = false;
+    setTag(tagBaro, false); setTag(tagGeo, false); setTag(tagAccel, false);
+    hRelEl.textContent = '0.0'; vRateEl.textContent = '0.0'; srcEl.textContent = '—';
+    velZ = 0; dispZ = 0; lastMotionT = null;
+
+    startBarometer();
+    startGeolocation();
+    startAccelerometer();
+    requestAnimationFrame(tick);
+  }
+
+  function stopAll(){
     running = false;
     startBtn.disabled = false; stopBtn.disabled = true;
+    statusNote.textContent = '중지'; statusNote.classList.remove('ok');
     try{
       if (watchId != null) navigator.geolocation.clearWatch(watchId);
       watchId = null;
       if (baro && baro.stop) baro.stop();
+      window.removeEventListener('devicemotion', ()=>{}, true); // generic remove
     }catch(e){}
   }
 
-  startBtn.onclick = start;
-  stopBtn.onclick = stop;
-
-  kvalEl.textContent = K.toFixed(1);
-  kUp.onclick = ()=>{ K = Math.min(1.2, K+0.1); kvalEl.textContent = K.toFixed(1); };
-  kDown.onclick = ()=>{ K = Math.max(0.1, K-0.1); kvalEl.textContent = K.toFixed(1); };
+  startBtn.addEventListener('click', startAll);
+  stopBtn.addEventListener('click', stopAll);
 })();
 </script>
 </body>
