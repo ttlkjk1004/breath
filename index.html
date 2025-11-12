@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모바일 호흡 피크 테스트 - 진단 버전</title>
+<style>
+  :root{--bg:#0b0f14;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--warn:#ffb454;--err:#ff6b6b}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:860px;margin:0 auto;padding:16px}
+  h1{font-size:20px;margin:12px 0}
+  .card{background:#111826;border:1px solid #1e293b;border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0}
+  button{appearance:none;border:0;border-radius:12px;padding:14px 16px;background:var(--accent);color:#001533;font-weight:700}
+  button.secondary{background:#1f2a3b;color:var(--fg)}
+  .stat{flex:1 1 160px;background:#0e1622;border:1px solid #1e2737;border-radius:12px;padding:12px}
+  .big{font-size:28px;font-weight:800}
+  .small{font-size:12px;color:var(--muted)}
+  canvas{width:100%;height:160px;background:#0e141d;border-radius:12px;border:1px solid #1e2737}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+  .box{border:1px dashed #2a3b55;border-radius:12px;padding:12px;margin:12px 0;background:#0c1420}
+  .ok{color:#7ae582}
+  .warn{color:var(--warn)}
+  .err{color:var(--err)}
+  code{background:#0c1320;padding:2px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>모바일 호흡 피크 테스트 – 진단 버전</h1>
+
+  <div class="box" id="envBox"></div>
+
+  <div class="card">
+    <div class="row" style="gap:8px">
+      <button id="startBtn">마이크 시작</button>
+      <button id="stopBtn" class="secondary" disabled>중지</button>
+      <button id="kUp" class="secondary">k↑</button>
+      <button id="kDown" class="secondary">k↓</button>
+    </div>
+    <div class="row">
+      <div class="stat"><div class="small">분당 호흡수 (RPM)</div><div id="rpm" class="big">0.0</div></div>
+      <div class="stat"><div class="small">피크 수(최근 30초)</div><div id="peaks" class="big">0</div></div>
+      <div class="stat"><div class="small">임계값 k</div><div id="kval" class="big">0.5</div></div>
+    </div>
+    <canvas id="scope" width="800" height="160"></canvas>
+    <div class="hint">
+      • 버튼이 동작하지 않으면 아래 진단 메시지를 확인하세요. <br>
+      • iOS는 <b>HTTPS</b> 환경에서만 마이크가 허용됩니다. 파일을 직접 열면(<code>file://</code>) 마이크가 막힐 수 있어요. <br>
+      • 앱 내 미리보기(WebView)는 권한을 막을 수 있어요. <b>Safari/Chrome 외부 브라우저</b>로 여세요. <br>
+      • 그래프가 너무 민감/둔감하면 k를 조절(k↑/k↓).
+    </div>
+  </div>
+
+  <div class="card">
+    <div><b>에러/로그</b></div>
+    <pre id="log" class="hint" style="white-space:pre-wrap;height:140px;overflow:auto;background:#0a111c;padding:12px;border-radius:12px;border:1px solid #1b2536"></pre>
+  </div>
+</div>
+
+<script>
+(() => {
+  const logEl = document.getElementById('log');
+  const envBox = document.getElementById('envBox');
+  function log(msg){ logEl.textContent += msg + "\\n"; logEl.scrollTop = logEl.scrollHeight; }
+
+  // 환경 체크
+  const ua = navigator.userAgent;
+  const isSecure = window.isSecureContext;
+  const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const info = [
+    `<b>브라우저</b>: ${ua}`,
+    `<b>보안 컨텍스트(HTTPS)</b>: ${isSecure ? '<span class="ok">YES</span>' : '<span class="warn">NO</span>'}`,
+    `<b>getUserMedia 지원</b>: ${hasMedia ? '<span class="ok">YES</span>' : '<span class="err">NO</span>'}`,
+    `<b>앱 내 WebView</b>: ${isStandalone ? 'PWA/Standalone' : '일반 탭(또는 내장 뷰어)'}`
+  ].join('<br>');
+  envBox.innerHTML = `<div><b>환경 진단</b></div><div style="margin-top:6px">${info}</div>`;
+
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn  = document.getElementById('stopBtn');
+  const kUp = document.getElementById('kUp');
+  const kDown = document.getElementById('kDown');
+  const kvalEl = document.getElementById('kval');
+  const rpmEl = document.getElementById('rpm');
+  const peaksEl = document.getElementById('peaks');
+  const scope = document.getElementById('scope');
+  const g = scope.getContext('2d');
+
+  let audioCtx, analyser, source, mediaStream;
+  let rafId = null, running = false;
+
+  // 분석 파라미터
+  const FRAME_SEC = 0.05;
+  const WINDOW_SEC = 30;
+  const MIN_BREATH_SEC = 1.0;
+  let K = 0.5;
+
+  kUp.onclick = ()=>{ K = Math.min(1.2, K+0.1); kvalEl.textContent = K.toFixed(1); };
+  kDown.onclick = ()=>{ K = Math.max(0.1, K-0.1); kvalEl.textContent = K.toFixed(1); };
+
+  startBtn.onclick = start;
+  stopBtn.onclick = stop;
+
+  if (!hasMedia){
+    log("이 브라우저/환경에서는 getUserMedia가 지원되지 않습니다. HTTPS에서 Safari/Chrome으로 여세요.");
+  }
+  if (!isSecure){
+    log("⚠ 보안(HTTPS) 컨텍스트가 아닙니다. iOS Safari에서는 마이크 권한이 거부될 수 있습니다.");
+  }
+
+  async function start(){
+    if (running) return;
+    try{
+      running = true;
+      kvalEl.textContent = K.toFixed(1);
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
+      if (audioCtx.state === 'suspended'){
+        await audioCtx.resume();
+      }
+      log("AudioContext state: " + audioCtx.state);
+
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+        video: false
+      });
+      log("마이크 권한 OK.");
+
+      source = audioCtx.createMediaStreamSource(mediaStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.0;
+      source.connect(analyser);
+
+      envBuf = [];
+      lastPeakTime = -Infinity;
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+
+      loop();
+    }catch(err){
+      running = false;
+      log("❌ 시작 실패: " + (err && err.message ? err.message : err));
+      if (String(err).includes('NotAllowedError')){
+        log("팁) 브라우저 주소창 왼쪽의 마이크 권한을 허용하거나, 외부 브라우저(Chrome/Safari)에서 HTTPS로 여세요.");
+      }
+    }
+  }
+
+  function stop(){
+    running = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); }
+    if (audioCtx){ audioCtx.close(); }
+    log("중지됨.");
+  }
+
+  // 엔벌로프 계산 상태
+  const tmp = new Float32Array(2048);
+  let envBuf = [];
+  let lastEnvTime = 0;
+  let lastEnvVal = 0;
+  const alpha = 0.2;
+
+  function computeEnvelope(){
+    analyser.getFloatTimeDomainData(tmp);
+    const now = performance.now() / 1000;
+
+    let sum = 0;
+    for (let i=0;i<tmp.length;i++) sum += tmp[i]*tmp[i];
+    const rmsInstant = Math.sqrt(sum / tmp.length);
+
+    const env = alpha * rmsInstant + (1 - alpha) * lastEnvVal;
+    lastEnvVal = env;
+
+    if ((now - lastEnvTime) >= FRAME_SEC){
+      envBuf.push({ t: now, v: env });
+      lastEnvTime = now;
+    }
+
+    const cutoff = now - WINDOW_SEC;
+    while (envBuf.length && envBuf[0].t < cutoff) envBuf.shift();
+  }
+
+  let lastPeakTime = -Infinity;
+  function analyze(){
+    if (envBuf.length < 5) return { rpm: 0, peaks: [], norm: [] };
+
+    const vals = envBuf.map(x=>x.v);
+    const vmax = Math.max(1e-9, Math.max(...vals));
+    const vmin = Math.min(...vals);
+    const norm = vals.map(v => (v - vmin) / (vmax - vmin));
+
+    const mu = mean(norm);
+    const sigma = std(norm, mu);
+    const thr = mu + K * sigma;
+
+    const peaks = [];
+    for (let i=1;i<norm.length;i++){
+      if (norm[i-1] < thr && norm[i] >= thr){
+        const t = envBuf[i].t;
+        if (t - lastPeakTime >= MIN_BREATH_SEC){
+          peaks.push(t);
+          lastPeakTime = t;
+        }
+      }
+    }
+
+    let rpm = 0;
+    if (peaks.length >= 2){
+      const diffs = [];
+      for (let i=1;i<peaks.length;i++){
+        const d = peaks[i] - peaks[i-1];
+        if (d > 0.8 && d < 10) diffs.push(d);
+      }
+      if (diffs.length){
+        const meanT = diffs.reduce((a,b)=>a+b,0)/diffs.length;
+        rpm = 60 / meanT;
+      }
+    }
+
+    return { rpm, peaks, thr, norm };
+  }
+
+  function mean(a){ return a.reduce((x,y)=>x+y,0)/a.length }
+  function std(a,m){ const v=a.reduce((s,x)=>s+(x-m)*(x-m),0)/a.length; return Math.sqrt(v) }
+
+  function render(res){
+    const width = scope.width, height = scope.height;
+    g.clearRect(0,0,width,height);
+    g.fillStyle = '#0b1220';
+    g.fillRect(0,0,width,height);
+
+    g.strokeStyle = '#1e2737';
+    g.beginPath();
+    g.moveTo(0, height-24);
+    g.lineTo(width, height-24);
+    g.stroke();
+
+    if (!envBuf.length) return;
+
+    const N = envBuf.length;
+    const xs = (i)=> i*(width/(N-1));
+    const ys = (v)=> (1-v)*(height-30) + 6;
+
+    g.strokeStyle = '#6aa6ff';
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let i=0;i<N;i++){
+      const v = res ? res.norm[i] : (envBuf[i].v);
+      const x = xs(i), y = ys(v);
+      if (i===0) g.moveTo(x,y); else g.lineTo(x,y);
+    }
+    g.stroke();
+
+    if (res){
+      g.strokeStyle = '#58d68d';
+      g.setLineDash([6,6]);
+      g.beginPath();
+      const ythr = ys(res.thr);
+      g.moveTo(0, ythr);
+      g.lineTo(width, ythr);
+      g.stroke();
+      g.setLineDash([]);
+    }
+
+    if (res && res.peaks.length){
+      g.fillStyle = '#ffd166';
+      const t0 = envBuf[0].t;
+      const dt = FRAME_SEC;
+      res.peaks.forEach(tp => {
+        const i = Math.max(0, Math.min(N-1, Math.round((tp - t0)/dt)));
+        const x = xs(i), y = ys(res.norm[i]||0);
+        g.beginPath();
+        g.arc(x, y, 4, 0, Math.PI*2);
+        g.fill();
+      });
+    }
+  }
+
+  function loop(){
+    try{
+      computeEnvelope();
+      const res = analyze();
+      render(res);
+      rpmEl.textContent = (res.rpm || 0).toFixed(1);
+      peaksEl.textContent = (res.peaks ? res.peaks.length : 0);
+    }catch(e){
+      log("렌더 루프 에러: " + e.message);
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+})();
+</script>
+</body>
+</html>
