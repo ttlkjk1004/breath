@@ -3,39 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>모바일 호흡 코칭(마이크 기반) · 실시간 파형/엔벌로프/RPM</title>
+  <title>모바일 호흡 코칭(마이크) · 파형/엔벌로프/RPM + 코칭</title>
   <style>
-    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454}
+    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ff6b6b;--amber:#ffb454}
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
-    .wrap{max-width:940px;margin:0 auto;padding:16px}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg);transition:background-color .25s}
+    .wrap{max-width:980px;margin:0 auto;padding:16px}
     h1{font-size:20px;margin:10px 0 14px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 12px 30px rgba(0,0,0,.35);margin-bottom:14px}
+    .card{background:#111826;border:1px solid #1e293b;border-radius:16px;padding:16px;box-shadow:0 12px 30px rgba(0,0,0,.35);margin-bottom:14px}
     .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
     button{appearance:none;border:0;border-radius:12px;padding:12px 14px;background:var(--accent);color:#001533;font-weight:800}
     button.secondary{background:#1f2a3b;color:var(--fg)}
     .stat{flex:1 1 170px;background:#0e1622;border:1px solid #1e2737;border-radius:12px;padding:12px}
     .big{font-size:26px;font-weight:800}
     .small{font-size:12px;color:var(--muted)}
-    canvas{width:100%;height:200px;background:#0e141d;border:1px solid var(--line);border-radius:12px}
-    .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
-    .section-title{font-size:13px;color:#9fb3c7;margin:6px 0}
-    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
-    input[type=range]{width:180px}
+    canvas{width:100%;height:200px;background:#0e141d;border:1px solid #1e2737;border-radius:12px}
     label{font-size:12px;color:#9fb3c7;margin-right:8px}
+    input[type=range]{width:180px}
+    .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1622;border:1px solid #243246;color:#cfe3ff;font-size:12px}
+    .ok{color:var(--green)} .warn{color:var(--warn)} .amber{color:var(--amber)}
+    .coachHud{display:flex;align-items:center;gap:10px;margin-top:6px}
+    .phase{font-size:16px;font-weight:800;padding:6px 10px;border-radius:10px;border:1px solid #243246;background:#0f1623}
+    .barWrap{flex:1;height:12px;background:#0e1622;border:1px solid #1e2737;border-radius:999px;overflow:hidden}
+    .bar{height:100%;background:#6aa6ff;width:0%}
+    .toggle{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:10px;border:1px solid #243246;background:#0f1623;font-size:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>모바일 호흡 코칭(마이크 기반) · 실시간 파형/엔벌로프/RPM</h1>
+    <h1>모바일 호흡 코칭(마이크) · 실시간 파형/엔벌로프/RPM + 코칭</h1>
 
     <div class="card">
       <div class="row" style="gap:10px; margin-bottom:8px">
         <button id="startBtn">마이크 시작</button>
         <button id="stopBtn" class="secondary" disabled>중지</button>
-        <span id="httpsNote" class="stat" style="flex:0 0 auto;padding:8px 10px;display:inline-block">
-          <span class="small">상태</span><div id="stateTxt" class="big" style="font-size:16px">대기</div>
-        </span>
+        <span class="badge"><span class="small">상태</span> <b id="stateTxt">대기</b></span>
+        <span class="badge"><span class="small">코칭</span> <b id="coachState">끄기</b></span>
+        <span class="badge"><span class="small">경보</span> <b id="alertTxt">—</b></span>
       </div>
 
       <div class="grid">
@@ -44,7 +50,7 @@
         <div class="stat"><div class="small">임계값 K</div><div id="kval" class="big">0.6</div></div>
       </div>
 
-      <div class="row" style="gap:12px; margin-top:10px">
+      <div class="row" style="gap:12px; margin-top:10px; flex-wrap:wrap">
         <label>하이패스(Hz) <input id="hp" type="range" min="10" max="200" step="10" value="50"><span id="hpv">50</span></label>
         <label>로우패스(Hz) <input id="lp" type="range" min="400" max="2000" step="100" value="900"><span id="lpv">900</span></label>
         <label>스무딩 α <input id="alpha" type="range" min="0.05" max="0.6" step="0.05" value="0.25"><span id="alphav">0.25</span></label>
@@ -52,39 +58,78 @@
         <button id="kDown" class="secondary">K↓</button>
         <button id="calib" class="secondary">노이즈 보정(2초)</button>
       </div>
+    </div>
 
-      <div class="section-title">실시간 원시 파형</div>
-      <canvas id="wave" width="900" height="200" aria-label="마이크 파형"></canvas>
-
-      <div class="section-title" style="margin-top:10px">엔벌로프/임계선/피크</div>
-      <canvas id="env" width="900" height="200" aria-label="엔벌로프"></canvas>
-
+    <div class="card">
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <label>목표 RPM <input id="targetRPM" type="range" min="5" max="18" step="1" value="10"><span id="trpmv">10</span></label>
+        <label>흡:호 비율(%) <input id="inhalePct" type="range" min="20" max="80" step="5" value="40"><span id="inhv">40</span></label>
+        <label>허용 오차(%) <input id="tolPct" type="range" min="5" max="40" step="5" value="20"><span id="tolv">20</span></label>
+        <div class="toggle"><input id="vibe" type="checkbox"><label for="vibe">진동 큐</label></div>
+        <div class="toggle"><input id="beep" type="checkbox"><label for="beep">비프음 큐</label></div>
+        <button id="coachToggle" class="secondary">코칭 시작</button>
+      </div>
+      <div class="coachHud">
+        <div id="phase" class="phase">대기</div>
+        <div class="barWrap"><div id="phaseBar" class="bar"></div></div>
+      </div>
       <div class="hint">
-        • iOS는 <b>HTTPS</b> + 버튼 클릭 이후에만 마이크 접근 가능. 조용한 환경에서 폰을 입/코에서 10–15cm 거리로 테스트. <br>
-        • 기본 필터: <b>하이패스 50Hz</b>, <b>로우패스 900Hz</b> (호흡 잡음 대역). 필요시 슬라이더로 조정. <br>
-        • K는 민감도. <b>K↑</b> → 더 보수적(피크 덜 잡음), <b>K↓</b> → 더 민감. <br>
-        • “노이즈 보정”은 2초간 주변소음을 샘플링하여 배경 레벨을 약하게 빼줌.
+        • 코칭은 <b>목표 RPM</b>과 <b>흡:호 비율</b>에 맞춰 화면 색/텍스트/진동/비프음 큐를 줘. <br>
+        • 실제 측정 RPM이 목표에서 <b>허용 오차</b>를 넘으면 경보가 뜨고 상단 배경이 살짝 빨개져. <br>
+        • 권장 사용: 조용한 환경, 폰을 입/코에서 10–15cm.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="stat" style="flex:1"><div class="small">원시 파형</div></div>
+      </div>
+      <canvas id="wave" width="960" height="200"></canvas>
+      <div class="row" style="margin-top:10px">
+        <div class="stat" style="flex:1"><div class="small">엔벌로프/임계선/피크</div></div>
+      </div>
+      <canvas id="env" width="960" height="200"></canvas>
+      <div class="hint">
+        • K는 민감도(평균+K·표준편차). 잡음이 많으면 K↑, 반응이 둔하면 K↓. <br>
+        • “노이즈 보정”은 2초간 배경소음을 샘플링해 오프셋을 빼줌.
       </div>
     </div>
   </div>
 
 <script>
 (() => {
-  const FRAME_SEC = 0.05;         // envelope sample interval
-  const WINDOW_SEC = 30;          // rolling window for stats
-  const REFRACT_SEC = 1.0;        // min interval between peaks
-  let K = 0.6;                    // threshold scale
-  let alphaEnv = 0.25;            // envelope smoothing
-  let noiseOffset = 0;            // background offset after calibration
+  // ===== Detection params =====
+  const FRAME_SEC = 0.05;
+  const WINDOW_SEC = 30;
+  const REFRACT_SEC = 1.0;
+  let K = 0.6;
+  let alphaEnv = 0.25;
+  let noiseOffset = 0;
 
-  let audioCtx, analyser, mediaStream, source, hpFilter, lpFilter, gainNode;
+  // ===== Audio graph =====
+  let audioCtx, analyser, mediaStream, source, hpFilter, lpFilter, gainNode, beepOsc;
   let running = false, rafId=null;
-  let envBuf = [];                 // {t, v} raw envelope
-  let lastEnvVal = 0, lastEnvTime = 0, lastPeakTime=-Infinity;
 
-  // DOM
+  // ===== Buffers/State =====
+  let envBuf = [];  // {t, v}
+  let lastEnvVal = 0, lastEnvTime = 0, lastPeakTime=-Infinity;
+  let lastGoodRPM = 0;
+
+  // ===== Coaching state =====
+  let coachOn = false;
+  let targetRPM = 10;
+  let inhalePct = 0.40; // inhale fraction of cycle
+  let tolPct = 0.20;
+  let coachTimer = null;
+  let phase = '대기'; // '흡입' / '호흡'
+  let phaseStart = 0, phaseDur = 0;
+
+  // ===== DOM =====
   const startBtn = document.getElementById('startBtn');
   const stopBtn  = document.getElementById('stopBtn');
+  const stateTxt = document.getElementById('stateTxt');
+  const coachState = document.getElementById('coachState');
+  const alertTxt = document.getElementById('alertTxt');
   const rpmEl = document.getElementById('rpm');
   const peaksEl = document.getElementById('peaks');
   const kvalEl = document.getElementById('kval');
@@ -101,24 +146,41 @@
   const kUp = document.getElementById('kUp');
   const kDown = document.getElementById('kDown');
   const calib = document.getElementById('calib');
-  const stateTxt = document.getElementById('stateTxt');
 
+  const targetRPMR = document.getElementById('targetRPM');
+  const trpmv = document.getElementById('trpmv');
+  const inhalePctR = document.getElementById('inhalePct');
+  const inhv = document.getElementById('inhv');
+  const tolPctR = document.getElementById('tolPct');
+  const tolv = document.getElementById('tolv');
+  const coachToggle = document.getElementById('coachToggle');
+  const phaseBadge = document.getElementById('phase');
+  const phaseBar = document.getElementById('phaseBar');
+  const vibe = document.getElementById('vibe');
+  const beep = document.getElementById('beep');
+
+  // ===== UI init =====
   kvalEl.textContent = K.toFixed(1);
   hpv.textContent = hp.value;
   lpv.textContent = lp.value;
   alphav.textContent = alphaR.value;
+  trpmv.textContent = targetRPMR.value;
+  inhv.textContent = inhalePctR.value;
+  tolv.textContent = tolPctR.value;
 
   hp.addEventListener('input', ()=>{ hpv.textContent = hp.value; if (hpFilter) hpFilter.frequency.value = +hp.value; });
   lp.addEventListener('input', ()=>{ lpv.textContent = lp.value; if (lpFilter) lpFilter.frequency.value = +lp.value; });
   alphaR.addEventListener('input', ()=>{ alphaEnv = +alphaR.value; alphav.textContent = alphaR.value; });
-
   kUp.onclick = ()=>{ K = Math.min(2.0, +(K+0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
   kDown.onclick = ()=>{ K = Math.max(0.1, +(K-0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
+  targetRPMR.addEventListener('input', ()=>{ trpmv.textContent = targetRPMR.value; targetRPM = +targetRPMR.value; if (coachOn) scheduleCoachCycle(); });
+  inhalePctR.addEventListener('input', ()=>{ inhv.textContent = inhalePctR.value; inhalePct = +inhalePctR.value/100; if (coachOn) scheduleCoachCycle(); });
+  tolPctR.addEventListener('input', ()=>{ tolv.textContent = tolPctR.value; tolPct = +tolPctR.value/100; });
 
+  // ===== Start/Stop =====
   async function start(){
     if (running) return;
     running = true;
-    kvalEl.textContent = K.toFixed(1);
     stateTxt.textContent = '권한 요청…';
 
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
@@ -130,31 +192,36 @@
     });
 
     source = audioCtx.createMediaStreamSource(mediaStream);
-
-    // Gain (preamp) – unity by default; keep in chain for future tweaks
     gainNode = audioCtx.createGain(); gainNode.gain.value = 1.0;
+    hpFilter = audioCtx.createBiquadFilter(); hpFilter.type='highpass'; hpFilter.frequency.value=+hp.value; hpFilter.Q.value=0.707;
+    lpFilter = audioCtx.createBiquadFilter(); lpFilter.type='lowpass'; lpFilter.frequency.value=+lp.value; lpFilter.Q.value=0.707;
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0;
 
-    // Filters
-    hpFilter = audioCtx.createBiquadFilter();
-    hpFilter.type = 'highpass'; hpFilter.frequency.value = +hp.value; hpFilter.Q.value = 0.707;
+    // Optionally create a beep oscillator (muted by default)
+    beepOsc = audioCtx.createOscillator(); beepOsc.type='sine'; beepOsc.frequency.value = 880;
+    const beepGain = audioCtx.createGain(); beepGain.gain.value = 0;
+    beepOsc.connect(beepGain).connect(audioCtx.destination);
+    beepOsc.start();
 
-    lpFilter = audioCtx.createBiquadFilter();
-    lpFilter.type = 'lowpass'; lpFilter.frequency.value = +lp.value; lpFilter.Q.value = 0.707;
-
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.0;
-
-    // Connect chain: source -> gain -> HP -> LP -> analyser
     source.connect(gainNode);
     gainNode.connect(hpFilter);
     hpFilter.connect(lpFilter);
     lpFilter.connect(analyser);
 
-    envBuf = []; lastEnvVal=0; lastEnvTime=0; lastPeakTime=-Infinity; noiseOffset=0;
+    envBuf = []; lastEnvVal=0; lastEnvTime=0; lastPeakTime=-Infinity; noiseOffset=0; lastGoodRPM=0;
     startBtn.disabled = true; stopBtn.disabled = false;
     stateTxt.textContent = '수집 중';
     loop();
+
+    function playBeep(ms=60){
+      if (!beep.checked) return;
+      const g = beepGain;
+      g.gain.cancelScheduledValues(audioCtx.currentTime);
+      g.gain.setValueAtTime(0, audioCtx.currentTime);
+      g.gain.linearRampToValueAtTime(0.05, audioCtx.currentTime + 0.005);
+      g.gain.linearRampToValueAtTime(0.0, audioCtx.currentTime + ms/1000);
+    }
+    window._playBeep = playBeep;
   }
 
   function stop(){
@@ -162,10 +229,12 @@
     startBtn.disabled = false; stopBtn.disabled = true;
     stateTxt.textContent = '중지';
     if (rafId) cancelAnimationFrame(rafId);
+    if (coachOn) toggleCoach();
     if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
     if (audioCtx) audioCtx.close();
   }
 
+  // ===== Envelope & peaks =====
   const tmp = new Float32Array(2048);
 
   function drawYAxis(ctx, W, H, ticks, toY, labelFmt, padL=40){
@@ -190,8 +259,6 @@
     const rms = Math.sqrt(sum/tmp.length);
     let env = alphaEnv * rms + (1 - alphaEnv) * lastEnvVal;
     lastEnvVal = env;
-
-    // subtract small background offset (after calibration)
     env = Math.max(0, env - noiseOffset);
 
     if ((now - lastEnvTime) >= FRAME_SEC){
@@ -211,7 +278,6 @@
     const mu = norm.reduce((a,b)=>a+b,0)/norm.length;
     const sigma = Math.sqrt(norm.reduce((s,x)=>s+(x-mu)*(x-mu),0)/norm.length);
     const thr = mu + K*sigma;
-
     const peaks = [];
     for (let i=1;i<norm.length;i++){
       if (norm[i-1] < thr && norm[i] >= thr){
@@ -267,11 +333,9 @@
     }
     ge.stroke();
 
-    // threshold line
     ge.strokeStyle = '#58d68d'; ge.setLineDash([6,6]); ge.beginPath();
     const ythr = toY(res.thr); ge.moveTo(x0, ythr); ge.lineTo(x0+plotW, ythr); ge.stroke(); ge.setLineDash([]);
 
-    // peak markers
     if (res.peaks && res.peaks.length){
       ge.fillStyle = '#ffd166';
       const t0 = envBuf[0].t, dt = FRAME_SEC;
@@ -289,12 +353,104 @@
     const res = analyze();
     drawWave();
     drawEnv(res);
+
     rpmEl.textContent = (res.rpm||0).toFixed(1);
     peaksEl.textContent = (res.peaks?res.peaks.length:0);
+
+    // coaching alert logic
+    handleAlerts(res);
+
     rafId = requestAnimationFrame(loop);
   }
 
-  // 2s background calibration
+  // ===== Coaching =====
+  function scheduleCoachCycle(){
+    if (!coachOn) return;
+    clearTimeout(coachTimer);
+    const cycle = 60 / targetRPM; // seconds
+    const inh = cycle * inhalePct;
+    const ex = cycle - inh;
+
+    phase = '흡입'; phaseStart = performance.now()/1000; phaseDur = inh;
+    setPhaseUI('#122b1a', '흡입');
+    cue();
+
+    coachTimer = setTimeout(()=>{
+      phase = '호흡'; phaseStart = performance.now()/1000; phaseDur = ex;
+      setPhaseUI('#2b1212', '호흡');
+      cue();
+      coachTimer = setTimeout(scheduleCoachCycle, ex*1000);
+    }, inh*1000);
+  }
+
+  function setPhaseUI(bg, label){
+    document.body.style.background = bg;
+    phaseBadge.textContent = label;
+    // animate progress bar
+    const start = performance.now();
+    const dur = phaseDur*1000;
+    phaseBar.style.transition = 'none'; phaseBar.style.width = '0%';
+    requestAnimationFrame(()=>{
+      phaseBar.style.transition = `width ${dur}ms linear`;
+      phaseBar.style.width = '100%';
+    });
+  }
+
+  function cue(){
+    if (vibe.checked && 'vibrate' in navigator){ navigator.vibrate(60); }
+    if (window._playBeep) window._playBeep(70);
+  }
+
+  function toggleCoach(){
+    coachOn = !coachOn;
+    coachState.textContent = coachOn ? '켜짐' : '끄기';
+    coachToggle.textContent = coachOn ? '코칭 중지' : '코칭 시작';
+    if (coachOn){ scheduleCoachCycle(); } else {
+      clearTimeout(coachTimer); coachTimer = null;
+      document.body.style.background = 'var(--bg)';
+      phaseBadge.textContent = '대기'; phaseBar.style.transition='none'; phaseBar.style.width='0%';
+    }
+  }
+
+  coachToggle.addEventListener('click', ()=>{
+    if (!running){ alert('먼저 마이크를 시작해줘'); return; }
+    toggleCoach();
+  });
+
+  // ===== Alerts & irregularity =====
+  function handleAlerts(res){
+    // compute deviation from target
+    const rpm = res.rpm || 0;
+    const target = targetRPM;
+    const tol = tolPct * target;
+    let msg = '정상';
+    let warn = false;
+
+    if (coachOn && target > 0){
+      if (rpm === 0){
+        // if no peaks for >8s: breath-hold or signal loss
+        const now = performance.now()/1000;
+        const latestT = envBuf.length ? envBuf[envBuf.length-1].t : 0;
+        if (now - lastPeakTime > 8){
+          msg = '신호 약함/무호흡?'; warn = true;
+        } else {
+          msg = '동기화 대기'; warn = false;
+        }
+      } else if (Math.abs(rpm - target) > tol){
+        msg = '목표 RPM 벗어남'; warn = true;
+      } else {
+        msg = '목표 범위 내';
+      }
+    } else {
+      msg = '모니터링 중';
+    }
+
+    alertTxt.textContent = msg;
+    alertTxt.classList.toggle('warn', warn);
+    document.body.style.boxShadow = warn ? 'inset 0 0 0 9999px rgba(255,0,0,0.08)' : 'none';
+  }
+
+  // ===== Calibration =====
   calib.onclick = async () => {
     if (!analyser) return;
     stateTxt.textContent = '노이즈 보정 중(2초)…';
@@ -310,12 +466,14 @@
       await new Promise(r=>setTimeout(r,50));
     }
     const avg = acc/Math.max(1,cnt);
-    noiseOffset = avg * 0.8; // subtract most of background
+    noiseOffset = avg * 0.8;
     stateTxt.textContent = '수집 중';
   };
 
+  // ===== Draw loop control =====
   startBtn.onclick = start;
   stopBtn.onclick = stop;
+
 })();
 </script>
 </body>
