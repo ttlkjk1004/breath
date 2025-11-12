@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>모바일 높낮이 실시간 · 바리오/지오/가속도(개선판)</title>
+  <title>모바일 호흡 코칭(마이크 기반) · 실시간 파형/엔벌로프/RPM</title>
   <style>
-    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454;--amber:#ffcd60}
+    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ffb454}
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
     .wrap{max-width:940px;margin:0 auto;padding:16px}
@@ -19,334 +19,303 @@
     .small{font-size:12px;color:var(--muted)}
     canvas{width:100%;height:200px;background:#0e141d;border:1px solid var(--line);border-radius:12px}
     .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
-    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1622;border:1px solid #243246;color:#cfe3ff;font-size:12px}
-    .ok{color:var(--green)} .warn{color:var(--warn)} .amber{color:var(--amber)}
     .section-title{font-size:13px;color:#9fb3c7;margin:6px 0}
-    .srcs{display:flex;flex-wrap:wrap;gap:6px}
-    .tag{padding:3px 8px;border-radius:999px;border:1px solid #2a3950;background:#0f1623}
-    .on{border-color:#58d68d;color:#58d68d}
-    .off{border-color:#3a465a;color:#8aa0b6}
-    .meter{width:100%;height:10px;background:#0e1622;border:1px solid #1e2737;border-radius:8px;overflow:hidden}
-    .bar{height:100%;background:#6aa6ff;transform:scaleX(0);transform-origin:left}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+    input[type=range]{width:180px}
+    label{font-size:12px;color:#9fb3c7;margin-right:8px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>모바일 높낮이 실시간 · 바리오/지오/가속도(개선판)</h1>
+    <h1>모바일 호흡 코칭(마이크 기반) · 실시간 파형/엔벌로프/RPM</h1>
+
     <div class="card">
       <div class="row" style="gap:10px; margin-bottom:8px">
-        <button id="startBtn">시작(센서)</button>
+        <button id="startBtn">마이크 시작</button>
         <button id="stopBtn" class="secondary" disabled>중지</button>
-        <button id="zeroBtn" class="secondary" disabled>제로(0점 재설정)</button>
-        <button id="gainUp" class="secondary" disabled>Gain↑</button>
-        <button id="gainDown" class="secondary" disabled>Gain↓</button>
-        <span id="secNote" class="badge">HTTPS 권장</span>
-        <span id="statusNote" class="badge">대기 중</span>
+        <span id="httpsNote" class="stat" style="flex:0 0 auto;padding:8px 10px;display:inline-block">
+          <span class="small">상태</span><div id="stateTxt" class="big" style="font-size:16px">대기</div>
+        </span>
       </div>
-      <div class="srcs">
-        <span id="tagBaro" class="tag off">Barometer</span>
-        <span id="tagGeo" class="tag off">Geolocation.alt</span>
-        <span id="tagAccel" class="tag off">Accelerometer(추정)</span>
-        <span class="tag">Gain: <b id="gainLabel">1.0×</b></span>
-      </div>
-      <div class="row" style="gap:10px; margin:10px 0 8px">
-        <div class="stat"><div class="small">상대 높이 Δh (cm)</div><div id="hRel" class="big">—</div></div>
-        <div class="stat"><div class="small">상승/하강 속도 (cm/s)</div><div id="vRate" class="big">—</div></div>
-        <div class="stat"><div class="small">활성 소스</div><div id="src" class="big">—</div></div>
-      </div>
-      <div class="section-title">세로 가속도(검증용) — 움직이면 막대가 반응해야 정상</div>
-      <div class="meter"><div id="aBar" class="bar"></div></div>
 
-      <div class="section-title" style="margin-top:12px">높이(Δh) 타임시리즈 — 시작 시점을 0으로 보정</div>
-      <canvas id="hChart" width="900" height="200" aria-label="상대 고도 그래프"></canvas>
+      <div class="grid">
+        <div class="stat"><div class="small">분당 호흡수 (RPM)</div><div id="rpm" class="big">0.0</div></div>
+        <div class="stat"><div class="small">피크 수(최근 30초)</div><div id="peaks" class="big">0</div></div>
+        <div class="stat"><div class="small">임계값 K</div><div id="kval" class="big">0.6</div></div>
+      </div>
+
+      <div class="row" style="gap:12px; margin-top:10px">
+        <label>하이패스(Hz) <input id="hp" type="range" min="10" max="200" step="10" value="50"><span id="hpv">50</span></label>
+        <label>로우패스(Hz) <input id="lp" type="range" min="400" max="2000" step="100" value="900"><span id="lpv">900</span></label>
+        <label>스무딩 α <input id="alpha" type="range" min="0.05" max="0.6" step="0.05" value="0.25"><span id="alphav">0.25</span></label>
+        <button id="kUp" class="secondary">K↑</button>
+        <button id="kDown" class="secondary">K↓</button>
+        <button id="calib" class="secondary">노이즈 보정(2초)</button>
+      </div>
+
+      <div class="section-title">실시간 원시 파형</div>
+      <canvas id="wave" width="900" height="200" aria-label="마이크 파형"></canvas>
+
+      <div class="section-title" style="margin-top:10px">엔벌로프/임계선/피크</div>
+      <canvas id="env" width="900" height="200" aria-label="엔벌로프"></canvas>
+
       <div class="hint">
-        • 개선점: 기존 일부 기기에서 <i>linear acceleration</i>가 0으로만 들어오던 문제를 해결하기 위해, <b>accIncludingGravity</b>에 <b>저역 통과(LPF)</b>로 중력 벡터를 추정하고, 이를 빼서 <b>선형가속도</b>를 얻은 뒤 중력방향으로 투영해 적분해. <br>
-        • 움직여도 Δh가 0이면 권한(모션/위치) 또는 브라우저 제한일 확률이 높아. 주소창 → 사이트 설정에서 권한 허용 확인.
+        • iOS는 <b>HTTPS</b> + 버튼 클릭 이후에만 마이크 접근 가능. 조용한 환경에서 폰을 입/코에서 10–15cm 거리로 테스트. <br>
+        • 기본 필터: <b>하이패스 50Hz</b>, <b>로우패스 900Hz</b> (호흡 잡음 대역). 필요시 슬라이더로 조정. <br>
+        • K는 민감도. <b>K↑</b> → 더 보수적(피크 덜 잡음), <b>K↓</b> → 더 민감. <br>
+        • “노이즈 보정”은 2초간 주변소음을 샘플링하여 배경 레벨을 약하게 빼줌.
       </div>
     </div>
   </div>
 
 <script>
 (() => {
-  // ===== UI =====
-  const secNote = document.getElementById('secNote');
-  const statusNote = document.getElementById('statusNote');
-  const tagBaro = document.getElementById('tagBaro');
-  const tagGeo = document.getElementById('tagGeo');
-  const tagAccel = document.getElementById('tagAccel');
+  const FRAME_SEC = 0.05;         // envelope sample interval
+  const WINDOW_SEC = 30;          // rolling window for stats
+  const REFRACT_SEC = 1.0;        // min interval between peaks
+  let K = 0.6;                    // threshold scale
+  let alphaEnv = 0.25;            // envelope smoothing
+  let noiseOffset = 0;            // background offset after calibration
+
+  let audioCtx, analyser, mediaStream, source, hpFilter, lpFilter, gainNode;
+  let running = false, rafId=null;
+  let envBuf = [];                 // {t, v} raw envelope
+  let lastEnvVal = 0, lastEnvTime = 0, lastPeakTime=-Infinity;
+
+  // DOM
   const startBtn = document.getElementById('startBtn');
   const stopBtn  = document.getElementById('stopBtn');
-  const zeroBtn  = document.getElementById('zeroBtn');
-  const gainUpBtn= document.getElementById('gainUp');
-  const gainDnBtn= document.getElementById('gainDown');
-  const gainLabel= document.getElementById('gainLabel');
-  const hRelEl = document.getElementById('hRel');
-  const vRateEl = document.getElementById('vRate');
-  const srcEl = document.getElementById('src');
-  const aBar = document.getElementById('aBar');
-  const canvas = document.getElementById('hChart');
-  const g = canvas.getContext('2d');
+  const rpmEl = document.getElementById('rpm');
+  const peaksEl = document.getElementById('peaks');
+  const kvalEl = document.getElementById('kval');
+  const wave = document.getElementById('wave');
+  const envc = document.getElementById('env');
+  const gw = wave.getContext('2d');
+  const ge = envc.getContext('2d');
+  const hp = document.getElementById('hp');
+  const lp = document.getElementById('lp');
+  const hpv = document.getElementById('hpv');
+  const lpv = document.getElementById('lpv');
+  const alphaR = document.getElementById('alpha');
+  const alphav = document.getElementById('alphav');
+  const kUp = document.getElementById('kUp');
+  const kDown = document.getElementById('kDown');
+  const calib = document.getElementById('calib');
+  const stateTxt = document.getElementById('stateTxt');
 
-  const isHTTPS = window.isSecureContext;
-  secNote.textContent = isHTTPS ? '보안 컨텍스트 OK' : 'HTTPS 권장(iOS 필요)';
-  if (!isHTTPS) secNote.classList.add('warn'); else secNote.classList.add('ok');
-  function setTag(el, on){ el.classList.toggle('on', on); el.classList.toggle('off', !on); }
+  kvalEl.textContent = K.toFixed(1);
+  hpv.textContent = hp.value;
+  lpv.textContent = lp.value;
+  alphav.textContent = alphaR.value;
 
-  // ===== Data state =====
-  let running = false;
-  let hBuf = []; // {t, h} meters
-  let lastH = 0, lastT = null;
-  let gain = 1.0;
+  hp.addEventListener('input', ()=>{ hpv.textContent = hp.value; if (hpFilter) hpFilter.frequency.value = +hp.value; });
+  lp.addEventListener('input', ()=>{ lpv.textContent = lp.value; if (lpFilter) lpFilter.frequency.value = +lp.value; });
+  alphaR.addEventListener('input', ()=>{ alphaEnv = +alphaR.value; alphav.textContent = alphaR.value; });
 
-  // Sources
-  let refPressure = null; // Pa
-  let baro = null, baroActive = false, lastBaroH = null;
-  let watchId = null, geoActive = false, refAltGeo = null, lastGeoH = null, lastGeoAcc = null;
-  let accelActive = false;
+  kUp.onclick = ()=>{ K = Math.min(2.0, +(K+0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
+  kDown.onclick = ()=>{ K = Math.max(0.1, +(K-0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
 
-  // Accelerometer improved
-  let gLPF = {x:0, y:0, z:0};       // gravity estimate (LPF)
-  const ALPHA = 0.02;                // LPF factor (0..1) small = smoother
-  let velZ = 0, dispZ = 0;           // integrated values
-  let lastMotionT = null;
-  const DAMP_V = 0.985;              // velocity damping
-  const DAMP_X = 0.9995;             // displacement slow drift clamp
-
-  // ===== Rendering =====
-  function drawAxes(){
-    const W = canvas.width, H = canvas.height;
-    g.fillStyle = '#0b1220'; g.fillRect(0,0,W,H);
-    g.strokeStyle = '#1e2737';
-    const padL = 46, padB = 18, padT = 8, padR = 6;
-    g.font = '12px system-ui,-apple-system,Segoe UI,Roboto,Noto Sans KR,sans-serif';
-    g.fillStyle = '#8aa0b6';
-    const cmRange = 10;
-    for (let cm = -cmRange; cm <= cmRange; cm += 2){
-      const y = mapY(cm/100, H, padT, padB);
-      g.strokeStyle = '#1e2737';
-      g.beginPath(); g.moveTo(padL, y); g.lineTo(W-padR, y); g.stroke();
-      g.fillText((cm>=0?'+':'') + cm + 'cm', 6, y+4);
-    }
-    g.beginPath(); g.moveTo(padL, padT); g.lineTo(padL, H - padB); g.stroke();
-    return { padL, padR, padT, padB };
-  }
-
-  function mapY(h_m, H, padT, padB){
-    const cmRange = 10;
-    const top = padT, bottom = H - padB;
-    const span = 2*cmRange/100;
-    let n = (h_m + cmRange/100) / span;
-    n = Math.max(0, Math.min(1, n));
-    return top + (1-n)*(bottom-top);
-  }
-
-  function render(){
-    const W = canvas.width, H = canvas.height;
-    const { padL, padR, padT, padB } = drawAxes();
-    const now = performance.now()/1000;
-    const cutoff = now - 30;
-    hBuf = hBuf.filter(p => p.t >= cutoff);
-    if (hBuf.length < 2) return;
-    const t0 = hBuf[0].t, t1 = hBuf[hBuf.length-1].t;
-    const dt = t1 - t0 || 1;
-    g.strokeStyle = '#6aa6ff'; g.lineWidth = 2; g.beginPath();
-    for (let i=0;i<hBuf.length;i++){
-      const x = padL + (hBuf[i].t - t0) / dt * (W - padL - padR);
-      const y = mapY(hBuf[i].h, H, padT, padB);
-      if (i===0) g.moveTo(x,y); else g.lineTo(x,y);
-    }
-    g.stroke();
-  }
-
-  // ===== Fusion helpers =====
-  function relAltFromPressure(pPa){
-    if (refPressure == null) { refPressure = pPa; return 0; }
-    const p0 = refPressure, p = pPa;
-    return 8434 * Math.log(p0 / p); // meters
-  }
-
-  function fuseHeights(hBaro, hGeo, acc){
-    const hasBaro = (typeof hBaro === 'number' && isFinite(hBaro));
-    const hasGeo  = (typeof hGeo === 'number'  && isFinite(hGeo));
-    if (hasBaro && hasGeo){
-      const wGeo = (acc && acc>0) ? Math.max(0.1, Math.min(0.9, 1/(acc/3))) : 0.5;
-      const wBaro = 1 - wGeo;
-      return wBaro*hBaro + wGeo*hGeo;
-    } else if (hasBaro) return hBaro;
-    else if (hasGeo) return hGeo;
-    return null;
-  }
-
-  function feedHeight(h_m, srcLabel){
-    const now = performance.now()/1000;
-    if (typeof h_m !== 'number' || !isFinite(h_m)) return;
-    if (lastT != null){
-      const v = (h_m - lastH) / (now - lastT);
-      vRateEl.textContent = (v*100).toFixed(1);
-    }
-    lastH = h_m; lastT = now;
-    hBuf.push({ t: now, h: h_m });
-    hRelEl.textContent = (h_m*100).toFixed(1);
-    srcEl.textContent = srcLabel;
-    render();
-  }
-
-  // ===== Barometer =====
-  function startBarometer(){
-    try{
-      if ('Barometer' in window){
-        baro = new Barometer({ frequency: 10 });
-        baro.addEventListener('reading', () => {
-          baroActive = true; setTag(tagBaro, true);
-          let p = baro.pressure ?? baro.reading?.pressure ?? baro.reading?.pressureValue;
-          if (typeof p !== 'number') return;
-          if (p < 200) p *= 1000; else if (p < 2000) p *= 100;
-          lastBaroH = relAltFromPressure(p);
-        });
-        baro.addEventListener('error', e => { console.warn('baro error', e); });
-        baro.start();
-      }
-    }catch(e){ console.warn('Barometer start failed', e); }
-  }
-
-  // ===== Geolocation =====
-  function startGeolocation(){
-    try{
-      if ('geolocation' in navigator){
-        watchId = navigator.geolocation.watchPosition((pos)=>{
-          geoActive = true; setTag(tagGeo, true);
-          const alt = pos.coords.altitude;
-          if (alt == null) return;
-          if (refAltGeo == null) refAltGeo = alt;
-          lastGeoH = alt - refAltGeo;
-          lastGeoAcc = pos.coords.altitudeAccuracy;
-        }, (err)=>{ console.warn('geo error', err); }, { enableHighAccuracy:true, maximumAge:500, timeout:8000 });
-      }
-    }catch(e){ console.warn('geo start failed', e); }
-  }
-
-  // ===== Accelerometer (improved) =====
-  function startAccelerometer(){
-    function onMotion(e){
-      accelActive = true; setTag(tagAccel, true);
-      const t = performance.now()/1000;
-      const dt = (lastMotionT==null) ? 0 : (t - lastMotionT);
-      lastMotionT = t;
-      const ag = e.accelerationIncludingGravity || {};
-      const axg = ag.x ?? 0, ayg = ag.y ?? 0, azg = ag.z ?? 0;
-
-      // LPF to estimate gravity vector
-      gLPF.x = (1-ALPHA)*gLPF.x + ALPHA*axg;
-      gLPF.y = (1-ALPHA)*gLPF.y + ALPHA*ayg;
-      gLPF.z = (1-ALPHA)*gLPF.z + ALPHA*azg;
-
-      // linear accel ≈ includingGravity - gravityLPF
-      const lax = axg - gLPF.x;
-      const lay = ayg - gLPF.y;
-      const laz = azg - gLPF.z;
-
-      // gravity direction (up vector)
-      const gmag = Math.hypot(gLPF.x, gLPF.y, gLPF.z) || 9.81;
-      const ux = gLPF.x / gmag, uy = gLPF.y / gmag, uz = gLPF.z / gmag;
-
-      // vertical acceleration along gravity axis (m/s^2)
-      const aVert = (lax*ux + lay*uy + laz*uz);
-
-      // Show accel meter (|aVert| / 2 m/s^2 capped)
-      const m = Math.min(1, Math.abs(aVert)/2);
-      aBar.style.transform = `scaleX(${m})`;
-
-      if (dt>0 && dt<0.5){
-        velZ = DAMP_V * (velZ + aVert * dt);
-        dispZ = DAMP_X * (dispZ + velZ * dt);
-        // gain (for small motions like 호흡)
-        const h = dispZ * gain;
-        // Clamp drift softly
-        if (Math.abs(h) > 0.25) { dispZ *= 0.98; }
-        feedHeight(h, activeSourceLabel());
-      }
-    }
-
-    function requestPermAndStart(){
-      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
-        DeviceMotionEvent.requestPermission().then(state => {
-          if (state === 'granted'){
-            window.addEventListener('devicemotion', onMotion, true);
-          }else{
-            statusNote.textContent = '가속도 권한 거부'; statusNote.classList.add('warn');
-          }
-        }).catch(()=>{
-          statusNote.textContent = '가속도 권한 요청 실패'; statusNote.classList.add('warn');
-        });
-      }else{
-        window.addEventListener('devicemotion', onMotion, true);
-      }
-    }
-    requestPermAndStart();
-  }
-
-  function activeSourceLabel(){
-    const parts = [];
-    if (baroActive) parts.push('Baro');
-    if (geoActive) parts.push('Geo');
-    if (!baroActive && !geoActive && accelActive) parts.push('Accel');
-    return parts.join('+') || '—';
-  }
-
-  // ===== Main tick: fuse baro+geo if present; else accel handler already feeds =====
-  function tick(){
-    if (!running){ requestAnimationFrame(tick); return; }
-    const fused = fuseHeights(lastBaroH, lastGeoH, lastGeoAcc);
-    if (fused != null){
-      // Zero reference is implicitly set at start by using deltas
-      feedHeight(fused, activeSourceLabel());
-    }
-    requestAnimationFrame(tick);
-  }
-
-  // ===== Start/Stop/Zero/Gain =====
-  function zeroRef(){
-    // Reset integrator & baselines
-    refPressure = null; refAltGeo = null;
-    lastBaroH = null; lastGeoH = null; lastGeoAcc = null;
-    velZ = 0; dispZ = 0; lastMotionT = null;
-    hBuf = []; lastH = 0; lastT = null;
-    hRelEl.textContent = '0.0'; vRateEl.textContent = '0.0';
-  }
-
-  function startAll(){
+  async function start(){
     if (running) return;
     running = true;
-    statusNote.textContent = '수집 중'; statusNote.classList.remove('warn'); statusNote.classList.add('ok');
-    startBtn.disabled = true; stopBtn.disabled = false; zeroBtn.disabled = false; gainUpBtn.disabled = false; gainDnBtn.disabled = false;
-    setTag(tagBaro, false); setTag(tagGeo, false); setTag(tagAccel, false);
-    zeroRef();
-    startBarometer();
-    startGeolocation();
-    startAccelerometer();
-    requestAnimationFrame(tick);
+    kvalEl.textContent = K.toFixed(1);
+    stateTxt.textContent = '권한 요청…';
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+      video: false
+    });
+
+    source = audioCtx.createMediaStreamSource(mediaStream);
+
+    // Gain (preamp) – unity by default; keep in chain for future tweaks
+    gainNode = audioCtx.createGain(); gainNode.gain.value = 1.0;
+
+    // Filters
+    hpFilter = audioCtx.createBiquadFilter();
+    hpFilter.type = 'highpass'; hpFilter.frequency.value = +hp.value; hpFilter.Q.value = 0.707;
+
+    lpFilter = audioCtx.createBiquadFilter();
+    lpFilter.type = 'lowpass'; lpFilter.frequency.value = +lp.value; lpFilter.Q.value = 0.707;
+
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.0;
+
+    // Connect chain: source -> gain -> HP -> LP -> analyser
+    source.connect(gainNode);
+    gainNode.connect(hpFilter);
+    hpFilter.connect(lpFilter);
+    lpFilter.connect(analyser);
+
+    envBuf = []; lastEnvVal=0; lastEnvTime=0; lastPeakTime=-Infinity; noiseOffset=0;
+    startBtn.disabled = true; stopBtn.disabled = false;
+    stateTxt.textContent = '수집 중';
+    loop();
   }
 
-  function stopAll(){
+  function stop(){
     running = false;
-    startBtn.disabled = false; stopBtn.disabled = true; zeroBtn.disabled = true; gainUpBtn.disabled = true; gainDnBtn.disabled = true;
-    statusNote.textContent = '중지'; statusNote.classList.remove('ok');
-    try{
-      if (watchId != null) navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      if (baro && baro.stop) baro.stop();
-      window.removeEventListener('devicemotion', ()=>{}, true);
-    }catch(e){}
+    startBtn.disabled = false; stopBtn.disabled = true;
+    stateTxt.textContent = '중지';
+    if (rafId) cancelAnimationFrame(rafId);
+    if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
+    if (audioCtx) audioCtx.close();
   }
 
-  function gainUp(){ gain = Math.min(8, +(gain + 0.5).toFixed(1)); gainLabel.textContent = gain.toFixed(1)+'×'; }
-  function gainDown(){ gain = Math.max(0.5, +(gain - 0.5).toFixed(1)); gainLabel.textContent = gain.toFixed(1)+'×'; }
+  const tmp = new Float32Array(2048);
 
-  startBtn.addEventListener('click', startAll);
-  stopBtn.addEventListener('click', stopAll);
-  zeroBtn.addEventListener('click', zeroRef);
-  gainUpBtn.addEventListener('click', gainUp);
-  gainDnBtn.addEventListener('click', gainDown);
+  function drawYAxis(ctx, W, H, ticks, toY, labelFmt, padL=40){
+    ctx.fillStyle = '#0b1220'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = '#1e2737'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, 0); ctx.lineTo(padL, H); ctx.stroke();
+    ctx.font = '12px system-ui,-apple-system,Segoe UI,Roboto,Noto Sans KR,sans-serif';
+    ctx.fillStyle = '#8aa0b6';
+    ticks.forEach(t => {
+      const y = toY(t);
+      ctx.strokeStyle = '#1e2737';
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.fillText(labelFmt(t), 6, y+4);
+    });
+    return padL;
+  }
+
+  function computeEnvelope(){
+    analyser.getFloatTimeDomainData(tmp);
+    const now = performance.now()/1000;
+    let sum = 0; for (let i=0;i<tmp.length;i++) sum += tmp[i]*tmp[i];
+    const rms = Math.sqrt(sum/tmp.length);
+    let env = alphaEnv * rms + (1 - alphaEnv) * lastEnvVal;
+    lastEnvVal = env;
+
+    // subtract small background offset (after calibration)
+    env = Math.max(0, env - noiseOffset);
+
+    if ((now - lastEnvTime) >= FRAME_SEC){
+      envBuf.push({t:now, v:env});
+      lastEnvTime = now;
+    }
+    const cutoff = now - WINDOW_SEC;
+    while (envBuf.length && envBuf[0].t < cutoff) envBuf.shift();
+  }
+
+  function analyze(){
+    if (envBuf.length < 5) return { rpm:0, peaks:[], thr:0, norm:[] };
+    const vals = envBuf.map(x=>x.v);
+    const vmax = Math.max(1e-9, Math.max(...vals));
+    const vmin = Math.min(...vals);
+    const norm = vals.map(v => (v - vmin) / Math.max(1e-9, (vmax - vmin)));
+    const mu = norm.reduce((a,b)=>a+b,0)/norm.length;
+    const sigma = Math.sqrt(norm.reduce((s,x)=>s+(x-mu)*(x-mu),0)/norm.length);
+    const thr = mu + K*sigma;
+
+    const peaks = [];
+    for (let i=1;i<norm.length;i++){
+      if (norm[i-1] < thr && norm[i] >= thr){
+        const t = envBuf[i].t;
+        if (t - lastPeakTime >= REFRACT_SEC){
+          peaks.push(t);
+          lastPeakTime = t;
+        }
+      }
+    }
+    let rpm = 0;
+    if (peaks.length >= 2){
+      const diffs = [];
+      for (let i=1;i<peaks.length;i++){
+        const d = peaks[i] - peaks[i-1];
+        if (d > 0.8 && d < 10) diffs.push(d);
+      }
+      if (diffs.length){
+        const meanT = diffs.reduce((a,b)=>a+b,0)/diffs.length;
+        rpm = 60/meanT;
+      }
+    }
+    return { rpm, peaks, thr, norm };
+  }
+
+  function drawWave(){
+    const W = wave.width, H = wave.height;
+    const toY = (v)=>{ const top=8, bottom=H-8; const n=(v+1)/2; return top + (1-n)*(bottom-top); };
+    const padL = drawYAxis(gw, W, H, [-1,-0.5,0,0.5,1], toY, v=>v.toFixed(1));
+    analyser.getFloatTimeDomainData(tmp);
+    gw.strokeStyle = '#9bd1ff'; gw.lineWidth = 2; gw.beginPath();
+    const N = tmp.length; const plotW = W - padL - 6; const x0 = padL;
+    for (let i=0;i<N;i++){
+      const x = x0 + i*(plotW/(N-1));
+      const y = toY(tmp[i]);
+      if (i===0) gw.moveTo(x,y); else gw.lineTo(x,y);
+    }
+    gw.stroke();
+  }
+
+  function drawEnv(res){
+    const W = envc.width, H = envc.height;
+    const toY = (v)=>{ const top=8,bottom=H-30; const n=Math.max(0,Math.min(1,v)); return top + (1-n)*(bottom-top); };
+    const padL = drawYAxis(ge, W, H, [0,0.25,0.5,0.75,1.0], toY, v=>v.toFixed(2));
+    if (!envBuf.length) return;
+    const N = envBuf.length; const plotW = W - padL - 6; const x0 = padL;
+
+    ge.strokeStyle = '#6aa6ff'; ge.lineWidth = 2; ge.beginPath();
+    for (let i=0;i<N;i++){
+      const x = x0 + i*(plotW/(N-1));
+      const y = toY(res.norm[i]||0);
+      if (i===0) ge.moveTo(x,y); else ge.lineTo(x,y);
+    }
+    ge.stroke();
+
+    // threshold line
+    ge.strokeStyle = '#58d68d'; ge.setLineDash([6,6]); ge.beginPath();
+    const ythr = toY(res.thr); ge.moveTo(x0, ythr); ge.lineTo(x0+plotW, ythr); ge.stroke(); ge.setLineDash([]);
+
+    // peak markers
+    if (res.peaks && res.peaks.length){
+      ge.fillStyle = '#ffd166';
+      const t0 = envBuf[0].t, dt = FRAME_SEC;
+      res.peaks.forEach(tp => {
+        const i = Math.max(0, Math.min(N-1, Math.round((tp - t0)/dt)));
+        const x = x0 + i*(plotW/(N-1));
+        const y = toY(res.norm[i]||0);
+        ge.beginPath(); ge.arc(x, y, 4, 0, Math.PI*2); ge.fill();
+      });
+    }
+  }
+
+  function loop(){
+    computeEnvelope();
+    const res = analyze();
+    drawWave();
+    drawEnv(res);
+    rpmEl.textContent = (res.rpm||0).toFixed(1);
+    peaksEl.textContent = (res.peaks?res.peaks.length:0);
+    rafId = requestAnimationFrame(loop);
+  }
+
+  // 2s background calibration
+  calib.onclick = async () => {
+    if (!analyser) return;
+    stateTxt.textContent = '노이즈 보정 중(2초)…';
+    noiseOffset = 0;
+    const tStart = performance.now();
+    let acc = 0, cnt = 0;
+    const buf = new Float32Array(2048);
+    while (performance.now() - tStart < 2000){
+      analyser.getFloatTimeDomainData(buf);
+      let s=0; for (let i=0;i<buf.length;i++) s += buf[i]*buf[i];
+      const rms = Math.sqrt(s/buf.length);
+      acc += rms; cnt++;
+      await new Promise(r=>setTimeout(r,50));
+    }
+    const avg = acc/Math.max(1,cnt);
+    noiseOffset = avg * 0.8; // subtract most of background
+    stateTxt.textContent = '수집 중';
+  };
+
+  startBtn.onclick = start;
+  stopBtn.onclick = stop;
 })();
 </script>
 </body>
