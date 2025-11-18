@@ -3,32 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>무음 호흡 파형 · 가속도(가슴 위 폰)</title>
+  <title>무음 호흡 파형 · 가속도(가슴 위 폰 · DIBH 윈도우)</title>
   <style>
-    :root{--bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;--muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ff6b6b}
+    :root{
+      --bg:#0b0f14;--card:#111826;--line:#1e293b;--fg:#e6f0ff;
+      --muted:#8aa0b6;--accent:#6aa6ff;--green:#58d68d;--warn:#ff6b6b;
+      --band:#12301f;
+    }
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;background:var(--bg);color:var(--fg)}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;
+      background:var(--bg);color:var(--fg)
+    }
     .wrap{max-width:980px;margin:0 auto;padding:16px}
     h1{font-size:20px;margin:10px 0 14px}
-    .card{background:#111826;border:1px solid #1e293b;border-radius:16px;padding:16px;box-shadow:0 12px 30px rgba(0,0,0,.35);margin-bottom:14px}
+    .card{
+      background:#111826;border:1px solid #1e293b;
+      border-radius:16px;padding:16px;
+      box-shadow:0 12px 30px rgba(0,0,0,.35);
+      margin-bottom:14px
+    }
     .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    button{appearance:none;border:0;border-radius:12px;padding:12px 14px;background:var(--accent);color:#001533;font-weight:800}
+    button{
+      appearance:none;border:0;border-radius:12px;
+      padding:12px 14px;background:var(--accent);
+      color:#001533;font-weight:800
+    }
     button.secondary{background:#1f2a3b;color:var(--fg)}
-    .stat{flex:1 1 170px;background:#0e1622;border:1px solid #1e2737;border-radius:12px;padding:12px}
+    .stat{
+      flex:1 1 170px;background:#0e1622;
+      border:1px solid #1e2737;border-radius:12px;
+      padding:12px
+    }
     .big{font-size:26px;font-weight:800}
     .small{font-size:12px;color:var(--muted)}
-    canvas{width:100%;height:200px;background:#0e141d;border:1px solid #1e2737;border-radius:12px}
+    canvas{
+      width:100%;height:200px;
+      background:#0e141d;border:1px solid #1e2737;border-radius:12px
+    }
     label{font-size:12px;color:#9fb3c7;margin-right:8px}
     input[type=range]{width:180px}
     .hint{color:var(--muted);font-size:12px;margin-top:8px;line-height:1.5}
-    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1622;border:1px solid #243246;color:#cfe3ff;font-size:12px}
+    .badge{
+      display:inline-block;padding:4px 8px;border-radius:999px;
+      background:#0e1622;border:1px solid #243246;
+      color:#cfe3ff;font-size:12px
+    }
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+    .chip{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:4px 10px;border-radius:999px;font-size:12px;
+      border:1px solid #243246;background:#0e1622;color:#cfe3ff
+    }
+    .chip span.label{color:var(--muted);font-size:11px}
+    .chip span.value{font-weight:700}
+    .chip span.status-ok{color:var(--green);font-weight:700}
+    .chip span.status-bad{color:var(--warn);font-weight:700}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>무음 호흡 파형 · 가속도(가슴 위 폰)</h1>
+    <h1>무음 호흡 파형 · 가속도(가슴 위 폰 · DIBH 윈도우)</h1>
 
+    <!-- 센서/필터 설정 -->
     <div class="card">
       <div class="row" style="gap:10px;margin-bottom:8px">
         <button id="startAcc">센서 시작</button>
@@ -40,16 +78,53 @@
         <span class="badge"><span class="small">Gain</span> <b id="gainLbl">1.0×</b></span>
       </div>
       <div class="row" style="gap:12px; margin-top:4px; flex-wrap:wrap">
-        <label>중력 분리 α(저역통과) <input id="alphaG" type="range" min="0.01" max="0.3" step="0.01" value="0.03"><span id="alphaGv">0.03</span></label>
-        <label>엔벌로프 α <input id="alphaEnv" type="range" min="0.05" max="0.6" step="0.05" value="0.25"><span id="alphaEnvv">0.25</span></label>
+        <label>
+          중력 분리 α(저역통과)
+          <input id="alphaG" type="range" min="0.01" max="0.3" step="0.01" value="0.03">
+          <span id="alphaGv">0.03</span>
+        </label>
+        <label>
+          엔벌로프 α
+          <input id="alphaEnv" type="range" min="0.05" max="0.6" step="0.05" value="0.25">
+          <span id="alphaEnvv">0.25</span>
+        </label>
       </div>
       <div class="hint">
-        • 폰을 <b>가슴/복부 위</b>에 올려두고 자연 호흡. 폰이 미끄러지지 않게 얇은 수건 위에 두면 안정적임.<br>
-        • <b>중력 분리</b>: 가속도+중력 센서에서 저역통과로 중력 벡터를 뽑고, 그 방향 성분을 제거해서 순수한 호흡 움직임만 사용.<br>
-        • 이렇게 얻은 <b>수직 가속도</b>를 적분해 <b>상대 변위</b>로 만들고, 이를 파형으로 사용.
+        • 폰을 <b>가슴/복부 위</b>에 올려두고 자연 호흡.<br>
+        • 가속도+중력 센서에서 <b>중력 벡터</b>를 분리하고, 그 축을 따라 가속도를 투영해 <b>수직 움직임</b>만 사용.<br>
+        • 아주 작은 진동(0.05g 이하)은 idle로 보고 적분을 멈춰, DIBH plateau가 최대한 고정되도록 설계.
       </div>
     </div>
 
+    <!-- DIBH 윈도우 설정 -->
+    <div class="card">
+      <div class="row" style="gap:10px;margin-bottom:8px">
+        <button id="lockDIBH" class="secondary" disabled>DIBH 기준 잠금</button>
+        <label>
+          DIBH 윈도우 (±cm)
+          <input id="winRange" type="range" min="0.2" max="2.0" step="0.1" value="0.5">
+          <span id="winRangeVal">0.5</span>
+        </label>
+        <span class="chip">
+          <span class="label">목표 레벨</span>
+          <span class="value" id="targetLevel">-</span>
+        </span>
+        <span class="chip">
+          <span class="label">현재 오차</span>
+          <span class="value" id="currError">-</span>
+        </span>
+        <span class="chip">
+          <span class="label">DIBH 상태</span>
+          <span id="dibhStatusText" class="status-bad">UNLOCKED</span>
+        </span>
+      </div>
+      <div class="hint">
+        • 평상 호흡 → 깊게 들숨 → <b>DIBH 기준 잠금</b> 버튼을 최대 들숨 타이밍에 눌러서 기준 레벨을 잡음.<br>
+        • 이후 숨을 멈추면 원시 파형 위에 <b>녹색 DIBH 밴드(목표 ± 윈도우)</b>가 표시되고, 현재 값이 그 안에 있으면 <b>IN WINDOW</b>로 표시.
+      </div>
+    </div>
+
+    <!-- 파형/RPM -->
     <div class="card">
       <div class="grid">
         <div class="stat"><div class="small">분당 호흡수 (RPM)</div><div id="rpm" class="big">0.0</div></div>
@@ -61,7 +136,11 @@
         <button id="kDown" class="secondary">K↓</button>
       </div>
       <div class="row" style="gap:12px; margin-top:10px">
-        <div class="stat" style="flex:1"><div class="small">원시 상대 변위(임의 단위, cm 비슷한 스케일)</div></div>
+        <div class="stat" style="flex:1">
+          <div class="small">
+            원시 상대 변위(임의 단위, cm 근사 스케일) + DIBH 윈도우 밴드
+          </div>
+        </div>
       </div>
       <canvas id="wave" width="960" height="200"></canvas>
       <div class="row" style="margin-top:10px">
@@ -70,7 +149,8 @@
       <canvas id="env" width="960" height="200"></canvas>
       <div class="hint">
         • K는 민감도(평균+K·표준편차). 잡음이 많으면 K↑, 반응이 둔하면 K↓.<br>
-        • 센서 드리프트가 느껴지면 <b>제로(0점)</b> 눌러서 변위/속도 초기화. Gain은 파형 높이만 조정.
+        • DIBH에서 숨을 고정해도 파형이 조금씩 기어가면, <b>제로(0점)</b>으로 한 번 리셋 후 다시 기준 잠금.<br>
+        • DIBH 밴드(녹색 영역) 안에 있으면 <b>IN WINDOW</b>, 벗어나면 <b>OUT OF WINDOW</b>로 표시.
       </div>
     </div>
   </div>
@@ -85,6 +165,8 @@
   let alphaEnv = 0.25;
   let alphaG = 0.03;      // gravity LPF
   let GAIN = 1.0;
+  const IDLE_G = 0.05;    // 0.05g 기준
+  const G0 = 9.81;
 
   // ===== DOM =====
   const startBtn = document.getElementById('startAcc');
@@ -107,11 +189,20 @@
   const wave = document.getElementById('wave'); const gw = wave.getContext('2d');
   const envc = document.getElementById('env'); const ge = envc.getContext('2d');
 
+  // DIBH 관련 DOM
+  const lockDIBHBtn = document.getElementById('lockDIBH');
+  const winRange = document.getElementById('winRange');
+  const winRangeVal = document.getElementById('winRangeVal');
+  const targetLevelEl = document.getElementById('targetLevel');
+  const currErrorEl = document.getElementById('currError');
+  const dibhStatusText = document.getElementById('dibhStatusText');
+
   // Init UI
   kvalEl.textContent = K.toFixed(1);
   gainLbl.textContent = GAIN.toFixed(1) + '×';
   alphaGv.textContent = alphaGR.value;
   alphaEnvv.textContent = alphaEnvR.value;
+  winRangeVal.textContent = winRange.value;
 
   alphaGR.addEventListener('input', ()=>{
     alphaG = +alphaGR.value;
@@ -121,6 +212,11 @@
     alphaEnv = +alphaEnvR.value;
     alphaEnvv.textContent = alphaEnvR.value;
   });
+  winRange.addEventListener('input', ()=>{
+    windowHalf = +winRange.value;
+    winRangeVal.textContent = winRange.value;
+  });
+
   kUp.onclick = ()=>{ K = Math.min(2.0, +(K+0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
   kDown.onclick = ()=>{ K = Math.max(0.1, +(K-0.1).toFixed(1)); kvalEl.textContent = K.toFixed(1); };
   gainUpBtn.onclick = ()=>{ GAIN = Math.min(8, +(GAIN+0.5).toFixed(1)); gainLbl.textContent = GAIN.toFixed(1)+'×'; };
@@ -140,12 +236,32 @@
   const DAMP_V = 0.985;   // velocity damping
   const DAMP_X = 0.9995;  // displacement damping
 
+  // ===== DIBH window state =====
+  let dibhLocked = false;
+  let holdLevel = 0;    // cm 근사
+  let windowHalf = +winRange.value; // ±cm
+  let lastH = 0;        // 마지막 샘플 높이
+
   function zero(){
     velZ = 0; dispZ = 0; lastT = null;
     envBuf = []; rawBuf = []; lastEnvVal = 0; lastEnvTime = 0; lastPeakTime = -Infinity;
+    dibhLocked = false;
+    holdLevel = 0;
+    targetLevelEl.textContent = '-';
+    currErrorEl.textContent = '-';
+    dibhStatusText.textContent = 'UNLOCKED';
+    dibhStatusText.className = 'status-bad';
     stateAcc.textContent = '0점 보정';
   }
   zeroBtn.onclick = zero;
+
+  lockDIBHBtn.onclick = ()=>{
+    // 현재 마지막 높이를 기준으로 DIBH 레벨 잠금
+    holdLevel = lastH;
+    dibhLocked = true;
+    targetLevelEl.textContent = holdLevel.toFixed(1) + ' cm';
+    dibhStatusText.textContent = 'IN WINDOW?';
+  };
 
   function drawYAxis(ctx, W, H, ticks, toY, labelFmt, padL=40){
     ctx.fillStyle = '#0b1220'; ctx.fillRect(0,0,W,H);
@@ -164,13 +280,40 @@
 
   function renderRaw(){
     const W = wave.width, H = wave.height;
-    const toY = (v)=>{ const top=8, bottom=H-8; const n = 0.5 + 0.5*(v/10); return top + (1-n)*(bottom-top); };
+    const top=8, bottom=H-8;
+    const scale = 10; // +/-10 cm 스케일로 표시
+    const toY = (v)=>{
+      const vClamped = Math.max(-scale, Math.min(scale, v));
+      const n = 0.5 + 0.5*(vClamped/scale); // -scale~+scale -> 0~1
+      return top + (1-n)*(bottom-top);
+    };
     const padL = drawYAxis(gw, W, H, [-10,-5,0,5,10], toY, v=>v.toFixed(0));
+    const plotW = W - padL - 6;
+
     const N = rawBuf.length; if (N<2) return;
     const t0 = rawBuf[0].t, t1 = rawBuf[N-1].t; const dt = t1-t0 || 1;
+
+    // DIBH 밴드(잠금 상태일 때만 표시)
+    if (dibhLocked){
+      const yTop = toY(holdLevel + windowHalf);
+      const yBot = toY(holdLevel - windowHalf);
+      gw.fillStyle = 'rgba(88,214,141,0.18)';
+      gw.fillRect(padL, Math.min(yTop,yBot), plotW, Math.abs(yBot - yTop));
+
+      // 중앙 타깃 라인
+      gw.strokeStyle = '#58d68d';
+      gw.setLineDash([4,4]);
+      gw.beginPath();
+      const yMid = toY(holdLevel);
+      gw.moveTo(padL, yMid); gw.lineTo(W, yMid);
+      gw.stroke();
+      gw.setLineDash([]);
+    }
+
+    // 파형
     gw.strokeStyle = '#9bd1ff'; gw.lineWidth=2; gw.beginPath();
     for (let i=0;i<N;i++){
-      const x = padL + (rawBuf[i].t - t0) / dt * (W - padL - 6);
+      const x = padL + (rawBuf[i].t - t0) / dt * plotW;
       const y = toY(rawBuf[i].x);
       if (i===0) gw.moveTo(x,y); else gw.lineTo(x,y);
     }
@@ -260,12 +403,31 @@
     while (envBuf.length && envBuf[0].t < cutoff) envBuf.shift();
   }
 
+  function updateDIBHIndicator(){
+    if (!dibhLocked){
+      dibhStatusText.textContent = 'UNLOCKED';
+      dibhStatusText.className = 'status-bad';
+      currErrorEl.textContent = '-';
+      return;
+    }
+    const err = lastH - holdLevel; // cm
+    currErrorEl.textContent = err.toFixed(1) + ' cm';
+    if (Math.abs(err) <= windowHalf){
+      dibhStatusText.textContent = 'IN WINDOW';
+      dibhStatusText.className = 'status-ok';
+    }else{
+      dibhStatusText.textContent = 'OUT OF WINDOW';
+      dibhStatusText.className = 'status-bad';
+    }
+  }
+
   function loop(){
     const res = analyze();
     renderRaw();
     renderEnv(res);
     rpmEl.textContent = (res.rpm||0).toFixed(1);
     peaksEl.textContent = (res.peaks?res.peaks.length:0);
+    updateDIBHIndicator();
     requestAnimationFrame(loop);
   }
 
@@ -285,10 +447,17 @@
     const laz = azg - gLPF.z;
 
     // Vertical axis = direction of gravity vector
-    const gmag = Math.hypot(gLPF.x, gLPF.y, gLPF.z) || 9.81;
+    const gmag = Math.hypot(gLPF.x, gLPF.y, gLPF.z) || G0;
     const ux = gLPF.x / gmag, uy = gLPF.y / gmag, uz = gLPF.z / gmag;
+
     // Projection of body accel onto gravity axis (m/s^2)
-    const aVert = (lax*ux + lay*uy + laz*uz);
+    let aVert = (lax*ux + lay*uy + laz*uz);
+
+    // 🔹 DIBH 안정화를 위한 idle 클램프 (아주 작은 진동은 적분하지 않음)
+    const IDLE_TH = IDLE_G * G0;  // 예: 0.05g
+    if (Math.abs(aVert) < IDLE_TH) {
+      aVert = 0;
+    }
 
     // Integrate to displacement
     if (lastT == null){ lastT = t; return; }
@@ -299,6 +468,7 @@
     velZ = DAMP_V * (velZ + aVert * dt);
     dispZ = DAMP_X * (dispZ + velZ * dt);
     const h = dispZ * GAIN * 100; // ~cm scale
+    lastH = h;
 
     pushRaw(h);
     pushEnv(Math.abs(h));
@@ -330,6 +500,7 @@
     zeroBtn.disabled = false;
     gainUpBtn.disabled = false;
     gainDownBtn.disabled = false;
+    lockDIBHBtn.disabled = false;
     stateAcc.textContent = '수집 중';
     loop();
   }
@@ -343,6 +514,7 @@
     zeroBtn.disabled = true;
     gainUpBtn.disabled = true;
     gainDownBtn.disabled = true;
+    lockDIBHBtn.disabled = true;
     stateAcc.textContent = '중지';
   }
 
